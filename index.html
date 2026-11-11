@@ -97,7 +97,7 @@ h2{font-family:var(--fun);font-weight:400;font-size:18px;margin:4px 0 12px}
 .ctrl small{display:block;font-size:11px;opacity:.85;white-space:nowrap}
 .pulse{animation:p 1.2s infinite}
 @keyframes p{50%{opacity:.55}}
-input[type=text],input[type=search],input[type=url],input[type=number],textarea,select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px solid var(--line);border-radius:12px;background:#fff;color:var(--ink)}
+input[type=password],input[type=text],input[type=search],input[type=url],input[type=number],textarea,select{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1.5px solid var(--line);border-radius:12px;background:#fff;color:var(--ink)}
 textarea{min-height:70px;resize:vertical}
 label.f{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
 .item{padding:12px 0;border-bottom:1px solid var(--line)}
@@ -437,7 +437,7 @@ window.addEventListener("online",()=>scheduleSync(500));
 setInterval(()=>{if(!document.hidden&&!P.running)sync();},60000);
 
 // ===== 음성 =====
-const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+
 let REC=null;
 const speechLang=lang=>lang==="ja"?"ja-JP":lang==="ko"?"ko-KR":S.settings.accent;
 function voicesFor(lang){if(!window.speechSynthesis)return[];const pre=lang==="ja"?"ja":lang==="ko"?"ko":S.settings.accent.slice(0,5).toLowerCase();return speechSynthesis.getVoices().filter(v=>v.lang.replace("_","-").toLowerCase().startsWith(pre));}
@@ -449,23 +449,126 @@ function speak(text,lang){return new Promise(res=>{
   let fin=false;const f=()=>{if(!fin){fin=true;clearTimeout(t);res();}};u.onend=f;u.onerror=f;
   const t=setTimeout(f,3000+(lang==="en"?text.split(" ").length*600:[...text].length*250));
   ss.speak(u);});}
-let mr=null,chunks=[],stream=null;
-async function startRecording(){try{stream=stream||await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];mr=new MediaRecorder(stream);
-  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
-  mr.onstop=()=>{if(!chunks.length)return;if(P.recUrl)URL.revokeObjectURL(P.recUrl);P.recUrl=URL.createObjectURL(new Blob(chunks,{type:mr.mimeType||"audio/mp4"}));renderP();};mr.start();}catch(e){mr=null;}}
-function stopRecording(){try{if(mr&&mr.state!=="inactive")mr.stop();}catch(e){}}
+let mr=null;
+async function startRecording(mic){try{
+  if(!window.MediaRecorder)return;
+  const gen=P.gen,parts=[],recorder=new MediaRecorder(mic);mr=recorder;
+  recorder.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
+  recorder.onstop=()=>{if(!parts.length||gen!==P.gen)return;if(P.recUrl)URL.revokeObjectURL(P.recUrl);
+    P.recUrl=URL.createObjectURL(new Blob(parts,{type:recorder.mimeType||"audio/mp4"}));renderP();};
+  recorder.start();
+}catch(e){mr=null;}}
+function stopRecording(){const recorder=mr;mr=null;try{if(recorder&&recorder.state!=="inactive")recorder.stop();}catch(e){}}
+// Azure Speech: 영구 키는 서버에만 보관하고, 토큰은 메모리에서만 사용합니다.
+const SPEECH_URL="https://script.google.com/macros/s/AKfycbwD7F7t6hZntilV8UviiyCATtuPH5SfFGFZxvQKXhvvDxy04R9wAToH2_aVywiStt0/exec";
+const SPEECH_SDK_URL="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.53.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
+const SPEECH={token:null,loading:null,code:"",message:""};
+try{SPEECH.code=sessionStorage.getItem("dokidoki-speech-code")||"";}catch(e){}
+const speechUrl=()=>S.settings.sheetUrl||SPEECH_URL;
+function saveSpeechCode(){
+  const code=$("#speechCode").value;
+  if(code.length<16){toast("연결 암호를 16자 이상 입력해 주세요");return;}
+  SPEECH.code=code;SPEECH.token=null;SPEECH.message="연결 암호를 저장했어요. 연결 테스트를 눌러 주세요.";
+  try{sessionStorage.setItem("dokidoki-speech-code",code);}catch(e){}
+  renderSettings();
+}
+async function testSpeechConnection(){
+  if(SPEECH.testing)return;
+  SPEECH.testing=true;SPEECH.message="Azure 연결 확인 중…";renderSettings();
+  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),15000);
+  try{await Promise.all([loadSpeechSDK(),getSpeechToken(controller.signal,true)]);SPEECH.message="✅ Azure 음성인식 연결 성공 · eastus";}
+  catch(e){SPEECH.message=errMsg(e);}
+  finally{clearTimeout(timeout);SPEECH.testing=false;if(view==="settings")renderSettings();}
+}
+function loadSpeechSDK(){
+  if(window.SpeechSDK)return Promise.resolve(window.SpeechSDK);
+  if(SPEECH.loading)return SPEECH.loading;
+  SPEECH.loading=new Promise((resolve,reject)=>{
+    const script=document.createElement("script");script.src=SPEECH_SDK_URL;script.async=true;
+    const timer=setTimeout(()=>fail(),15000);
+    const fail=()=>{clearTimeout(timer);script.remove();SPEECH.loading=null;reject({error:"sdk-load"});};
+    script.onload=()=>{clearTimeout(timer);if(window.SpeechSDK)resolve(window.SpeechSDK);else fail();};
+    script.onerror=fail;document.head.appendChild(script);
+  });return SPEECH.loading;
+}
+async function getSpeechToken(signal,force){
+  if(!SPEECH.code)throw {error:"speech-code"};
+  const url=speechUrl(),code=SPEECH.code;
+  const cached=SPEECH.token;
+  if(!force&&cached&&cached.url===url&&cached.code===code&&cached.expiresAt>Date.now()+30000)return cached;
+  let response;
+  try{response=await fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body:JSON.stringify({action:"azureToken",accessCode:code}),redirect:"follow",cache:"no-store",signal});}
+  catch(e){throw {error:signal&&signal.aborted?"aborted":"network"};}
+  if(!response.ok)throw {error:"token-server"};
+  let result;try{result=await response.json();}catch(e){throw {error:"token-server"};}
+  if(!result.ok){
+    SPEECH.token=null;
+    throw {error:result.error==="SPEECH_UNAUTHORIZED"?"speech-code":result.error==="SPEECH_NOT_CONFIGURED"?"speech-config":"token-server"};
+  }
+  if(typeof result.token!=="string"||!result.token||result.region!=="eastus"||!(result.expiresAt>Date.now()+30000))throw {error:"token-server"};
+  const value={token:result.token,region:result.region,expiresAt:result.expiresAt,url,code};
+  if(code===SPEECH.code&&url===speechUrl())SPEECH.token=value;
+  return value;
+}
+function azureError(e){
+  if(e&&e.error)return e;
+  const name=e&&e.name;
+  if(name==="NotAllowedError"||name==="SecurityError")return {error:"not-allowed"};
+  if(name==="NotFoundError"||name==="NotReadableError")return {error:"audio-capture"};
+  return {error:"network"};
+}
 function listen(lang){return new Promise((resolve,reject)=>{
-  if(!SR)return reject({error:"unsupported"});
-  const r=new SR();REC=r;r.lang=speechLang(lang);r.interimResults=true;r.continuous=false;r.maxAlternatives=3;
-  let alts=[],err=null,silence=null;const stopNow=()=>{try{r.stop();}catch(e){}};
-  const hard=setTimeout(stopNow,15000);const bump=ms=>{clearTimeout(silence);silence=setTimeout(stopNow,ms);};
-  r.onresult=e=>{const res=e.results;const top=[];for(let i=0;i<res.length;i++)top.push(res[i][0].transcript);
-    const joined=top.join(lang==="ja"?"":" ").trim();alts=[joined];if(res.length===1)for(let j=1;j<res[0].length;j++)alts.push(res[0][j].transcript);
-    P.interim=joined;const el=$("#heard");if(el)el.textContent="🗣 "+joined;bump(1600);};
-  r.onerror=e=>{err=e.error;};
-  r.onend=()=>{clearTimeout(hard);clearTimeout(silence);if(REC===r)REC=null;stopRecording();if(err&&err!=="no-speech"&&err!=="aborted")reject({error:err});else resolve({alts});};
-  (async()=>{try{if(S.settings.record)await startRecording();r.start();bump(7000);}catch(ex){reject({error:"start-failed"});}})();
+  if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return reject({error:"unsupported"});
+  let done=false,recognizer=null,audio=null,mic=null,hard=null,prepareTimer=null;
+  const controller=new AbortController();
+  const finish=(error,alts=[])=>{
+    if(done)return;done=true;clearTimeout(hard);clearTimeout(prepareTimer);controller.abort();
+    if(REC===session)REC=null;
+    stopRecording();
+    try{if(recognizer)recognizer.close();}catch(e){}
+    try{if(audio)audio.close();}catch(e){}
+    if(mic)mic.getTracks().forEach(t=>t.stop());
+    if(error)reject(azureError(error));else resolve({alts});
+  };
+  const session={abort:()=>finish(null)};REC=session;
+  prepareTimer=setTimeout(()=>finish({error:"network"}),20000);
+  (async()=>{try{
+    const [sdk,auth]=await Promise.all([loadSpeechSDK(),getSpeechToken(controller.signal)]);
+    if(done)return;
+    mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+    if(done){mic.getTracks().forEach(t=>t.stop());return;}
+    const config=sdk.SpeechConfig.fromAuthorizationToken(auth.token,auth.region);
+    config.speechRecognitionLanguage=speechLang(lang);config.outputFormat=sdk.OutputFormat.Detailed;
+    config.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,"7000");
+    config.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,"1600");
+    audio=sdk.AudioConfig.fromStream(mic);
+    sdk.SpeechRecognizer.enableTelemetry(false);
+    recognizer=new sdk.SpeechRecognizer(config,audio);
+    recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(()=>finish(null),15000);
+      setStatus("speak",P.round===3&&!P.review?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");};
+    recognizer.recognizing=(_,event)=>{if(done)return;P.interim=event.result.text||"";const el=$("#heard");if(el)el.textContent="🗣 "+P.interim;};
+    recognizer.canceled=(_,event)=>{
+      if(done)return;
+      if(event.reason===sdk.CancellationReason.Error){
+        if(event.errorCode===sdk.CancellationErrorCode.AuthenticationFailure){SPEECH.token=null;finish({error:"azure-auth"});}
+        else finish({error:"network"});
+      }else finish(null);
+    };
+    if(S.settings.record)await startRecording(mic);
+    if(done)return;
+    recognizer.recognizeOnceAsync(result=>{
+      if(done)return;
+      if(result.reason===sdk.ResultReason.RecognizedSpeech){
+        const alts=[result.text];
+        try{const detail=JSON.parse(result.json);(detail.NBest||[]).forEach(x=>{if(x.Display||x.Lexical)alts.push(x.Display||x.Lexical);});}catch(e){}
+        finish(null,[...new Set(alts.filter(Boolean))]);
+      }else if(result.reason===sdk.ResultReason.Canceled)finish({error:"network"});
+      else finish(null);
+    },()=>finish({error:"network"}));
+  }catch(e){finish(e);}})();
 });}
+
 
 // ===== 공부 시간 측정 =====
 const T={start:0,acc:0,lang:null};
@@ -541,8 +644,13 @@ function stopP(msg,flush){P.gen++;P.running=false;try{speechSynthesis.cancel();}
   if(flush)tFlush();else tPause();
   if(msg!==undefined)setStatus("idle",msg);}
 function errMsg(e){const c=e&&e.error;
-  if(c==="not-allowed"||c==="service-not-allowed")return"마이크·음성인식 권한이 꺼져 있어요. 아이폰 설정 > 앱 > Safari > 마이크, 설정 > 개인정보 보호 및 보안 > 음성 인식을 확인해 주세요.";
-  if(c==="unsupported")return"이 브라우저는 음성인식을 지원하지 않아요. 사파리나 크롬에서 열어 주세요.";
+  if(c==="not-allowed"||c==="service-not-allowed")return"마이크 권한을 허용해 주세요. 아이폰은 Safari의 웹사이트 설정에서 마이크를 허용할 수 있어요.";
+  if(c==="unsupported")return"마이크를 사용할 수 있는 HTTPS 사이트에서 열어 주세요.";
+  if(c==="speech-code")return"설정 → Azure 음성인식에서 연결 암호를 입력하고 저장해 주세요.";
+  if(c==="speech-config")return"음성인식 서버 설정을 확인해 주세요.";
+  if(c==="token-server"||c==="azure-auth")return"Azure 연결에 실패했어요. 설정에서 연결 테스트를 눌러 주세요.";
+  if(c==="sdk-load")return"음성인식 기능을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.";
+  if(c==="aborted")return"연결 시간이 초과됐어요. 다시 시도해 주세요.";
   if(c==="network")return"음성인식에 인터넷 연결이 필요해요.";
   if(c==="audio-capture")return"마이크를 쓸 수 없어요. 다른 앱이 마이크를 쓰고 있는지 확인해 주세요.";
   if(c==="language-not-supported")return"이 기기에서 이 언어의 음성인식을 지원하지 않아요.";
@@ -558,7 +666,7 @@ async function cycle(skipTTS){
     if(r3){setStatus("listen","🔊 한국어 뜻을 들려드릴게요");await speak(s.ko,"ko");}
     else{setStatus("listen",P.review?"🔊 정답을 잘 들어 보세요":"🔊 듣는 중…");await speak(text,s.lang);}
     if(g!==P.gen)return;await sleep(200);if(g!==P.gen)return;}
-  setStatus("speak",r3?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");
+  setStatus("listen","☁️ Azure 음성인식 준비 중…");
   let res;try{res=await listen(s.lang);}catch(e){if(g!==P.gen)return;stopP(errMsg(e));return;}
   if(g!==P.gen)return;
   const alts=(res.alts||[]).filter(a=>a&&a.trim());
@@ -663,7 +771,7 @@ function renderP(){
     </div>
   </div>
   ${s.memo?`<div class="card muted small">📌 ${esc(s.memo)}</div>`:""}
-  ${!SR?`<div class="card status warn">이 브라우저는 음성인식을 지원하지 않아요. 아이폰 사파리에서 열어 주세요.</div>`:""}`;
+  ${!navigator.mediaDevices?`<div class="card status warn">마이크를 사용할 수 있는 HTTPS 사이트에서 열어 주세요.</div>`:!SPEECH.code?`<div class="card status warn">설정 → Azure 음성인식에서 연결 암호를 먼저 입력해 주세요.</div>`:""}`;
 }
 
 // ===== 통계 계산 =====
@@ -896,6 +1004,13 @@ function renderSettings(){
     <div class="row" style="margin-top:10px"><button class="btn sm" onclick="testUrl()">연결 테스트</button><button class="btn sm pri" onclick="saveUrl()">저장하고 연결</button><button class="btn sm" onclick="sync(true)">지금 동기화</button></div>
     <div class="muted small" style="margin-top:10px">${syncLine()}</div>
     <div class="muted small" style="margin-top:6px">아이폰은 사파리와 홈 화면 앱의 저장 공간이 따로라서, 홈 화면에 추가한 뒤에 앱 안에서도 주소를 한 번 넣어 주세요.</div></div>
+  <div class="card"><h2>🎙 Azure 음성인식</h2>
+    <p class="muted small">영어·일본어 음성인식은 Microsoft Azure를 사용해요. 말할 때 마이크 권한과 인터넷 연결이 필요하며, 음성이 Azure로 전송돼요.</p>
+    <label class="f" for="speechCode">연결 암호</label><input type="password" id="speechCode" autocomplete="off" placeholder="정해 둔 연결 암호" value="${esc(SPEECH.draft??SPEECH.code)}" oninput="SPEECH.draft=this.value">
+    <div class="row" style="margin-top:10px"><button class="btn sm pri" onclick="saveSpeechCode()">암호 저장</button><button class="btn sm" onclick="testSpeechConnection()" ${SPEECH.testing?"disabled":""}>연결 테스트</button></div>
+    <p class="muted small" role="status">${esc(SPEECH.message||(SPEECH.code?"연결 암호가 저장돼 있어요.":"연결 암호를 입력하고 저장해 주세요."))}</p>
+    <p class="muted small">연결 암호는 이 탭에서 유지돼요. 새 기기나 새 탭에서는 다시 입력해 주세요.</p></div>
+
   <div class="card"><h2>연습</h2>
     <div class="set" style="display:block"><div class="row" style="justify-content:space-between"><div class="t">통과 기준</div><b class="fun" style="font-weight:400">${st.threshold}점</b></div>
       <input type="range" min="50" max="100" step="5" value="${st.threshold}" oninput="this.previousElementSibling.lastElementChild.textContent=this.value+'점'" onchange="setS('threshold',+this.value)">
@@ -904,7 +1019,7 @@ function renderSettings(){
     <div class="set"><div class="t">실패 허용<div class="d">한 회차에서 이만큼 틀리면 다음 문장으로 넘어가요 (3회차 정답 따라 하기는 안 셈)</div></div><select style="width:90px" onchange="setS('maxFail',+this.value)">${[1,2,3,4,5].map(n=>`<option value="${n}" ${n===st.maxFail?"selected":""}>${n}번</option>`).join("")}</select></div>
     <div class="set"><div class="t">한국어 뜻 기본 표시</div><label class="sw"><input type="checkbox" ${st.showKo?"checked":""} onchange="P.showKo=null;setS('showKo',this.checked)"><span></span></label></div>
     <div class="set"><div class="t">일본어 읽기·로마자 기본 표시</div><label class="sw"><input type="checkbox" ${st.showRead?"checked":""} onchange="P.showRead=null;setS('showRead',this.checked)"><span></span></label></div>
-    <div class="set"><div class="t">내 발음 녹음 (실험 기능)<div class="d">말한 걸 녹음해서 다시 들을 수 있어요. 아이폰에서는 음성인식과 동시에 안 될 수 있어요.</div></div><label class="sw"><input type="checkbox" ${st.record?"checked":""} onchange="setS('record',this.checked)"><span></span></label></div></div>
+    <div class="set"><div class="t">내 발음 녹음 (실험 기능)<div class="d">말한 걸 녹음해서 다시 들을 수 있어요. 기기에서 녹음을 지원하면 Azure 음성인식과 함께 녹음해요.</div></div><label class="sw"><input type="checkbox" ${st.record?"checked":""} onchange="setS('record',this.checked)"><span></span></label></div></div>
   <div class="card"><h2>목소리</h2>
     <div class="set"><div class="t">🇺🇸 영어 억양</div><div class="seg"><button class="${st.accent==="en-US"?"on":""}" onclick="S.settings.voiceEn='';setS('accent','en-US')">미국</button><button class="${st.accent==="en-GB"?"on":""}" onclick="S.settings.voiceEn='';setS('accent','en-GB')">영국</button></div></div>
     <div class="set"><div class="t">🇺🇸 영어</div><select style="width:150px" onchange="setS('voiceEn',this.value)"><option value="">자동</option>${ve.map(v=>`<option ${v.name===st.voiceEn?"selected":""}>${esc(v.name)}</option>`).join("")}</select><button class="btn sm" onclick="speak('Hello! Nice to meet you.','en')">🔊</button></div>
@@ -932,8 +1047,13 @@ function go(v){
 go("home");
 if(!S.me)chooseUser(true);
 document.addEventListener("visibilitychange",()=>{if(document.hidden){if(P.running)stopP("⏸ 멈췄어요. ▶ 로 이어서 해요",true);else tFlush();}else sync();});
-if("serviceWorker" in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("sw.js").catch(()=>{});
+if("serviceWorker" in navigator&&location.protocol.startsWith("http")){
+  const hadController=!!navigator.serviceWorker.controller;let reloading=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{if(hadController&&!reloading){reloading=true;location.reload();}});
+  navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{});
+}
 
 </script>
 </body>
 </html>
+
