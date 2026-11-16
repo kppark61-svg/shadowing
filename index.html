@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v23";const APP_DATE="2026-11-16";
+const APP_VERSION="v24";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -406,25 +406,47 @@ const localDate=(d=new Date())=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(
 const addDays=(ds,n)=>{const d=new Date(ds+"T00:00:00");d.setDate(d.getDate()+n);return localDate(d);};
 const mondayOf=ds=>{const d=new Date(ds+"T00:00:00");const w=(d.getDay()+6)%7;d.setDate(d.getDate()-w);return localDate(d);};
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
-function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.sentences)){d.settings={...DEF_SET,...(d.settings||{})};if(!d.settings.sheetUrl)d.settings.sheetUrl=DEFAULT_SHEET_URL;d.ui={...defUI(),...(d.ui||{})};d.decks=d.decks||[];d.serverV=d.serverV||0;if(d.pos&&!d.pos.queue)d.pos=null;delete d.my;return d;}}catch(e){}return null;}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.sentences)){d.settings={...DEF_SET,...(d.settings||{})};if(!d.settings.sheetUrl)d.settings.sheetUrl=DEFAULT_SHEET_URL;d.ui={...defUI(),...(d.ui||{})};d.decks=d.decks||[];d.arch=d.arch&&d.arch.st?d.arch:emptyArch();d.serverV=d.serverV||0;if(d.pos&&!d.pos.queue)d.pos=null;delete d.my;return d;}}catch(e){}return null;}
 function defUI(){return{period:"today",slang:"all",days:7,who:null};}
-let S=load()||{me:null,lang:"en",settings:{...DEF_SET},sentences:seed(),pos:null,decks:[],serverV:0,logs:[],outbox:[],connected:false,logRow:0,lastSync:"",syncErr:"",ui:defUI()};
+let S=load()||{me:null,lang:"en",settings:{...DEF_SET},sentences:seed(),pos:null,decks:[],serverV:0,logs:[],outbox:[],arch:emptyArch(),connected:false,logRow:0,lastSync:"",syncErr:"",ui:defUI()};
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){toast("저장 공간이 부족해요");}}
 save();
+setTimeout(()=>{try{if(archiveOld())save();}catch(e){}},0); // 앱이 다 준비된 뒤 오래된 기록 정리
 const byId=id=>S.sentences.find(s=>s.id===id);
 const catsOf=lang=>[...new Set(S.sentences.filter(s=>s.lang===lang).map(s=>s.cat))];
 // 문장 상태는 "기록"에서 계산 (완료/틀림/최고점/횟수/별표)
 let STC={k:"",m:{}};
 const NEWST={star:false,tries:0,best:0,status:"new",last:""};
-function stMap(){const u=S.me||"_";const k=u+"|"+S.logs.length+"|"+S.sentences.length;if(STC.k===k)return STC.m;const m={};
+function applyLog(m,l){
+  if(l.kind==="reset"){for(const id in m)Object.assign(m[id],{status:"new",tries:0,best:0});return;}
+  if(!l.sid)return;const x=m[l.sid]||(m[l.sid]={...NEWST});
+  if(l.kind==="try"){x.tries++;x.best=Math.max(x.best,+l.score||0);x.last=l.date;
+    if(l.result==="넘김"||l.result==="깜짝실패")x.status="failed";else if(l.result==="통과"&&+l.round>=maxRound(byId(l.sid)))x.status="done";}
+  else if(l.kind==="star")x.star=l.result==="켬";}
+function stMap(){const u=S.me||"_";const k=u+"|"+S.logs.length+"|"+S.sentences.length+"|"+S.arch.n;if(STC.k===k)return STC.m;
+  const m={};const base=S.arch.st[u]||{};for(const id in base)m[id]={...base[id]};
   const L=S.logs.filter(l=>l.user===u).sort((a,b)=>String(a.ts).localeCompare(String(b.ts)));
-  for(const l of L){
-    if(l.kind==="reset"){for(const id in m)Object.assign(m[id],{status:"new",tries:0,best:0});continue;}
-    if(!l.sid)continue;const x=m[l.sid]||(m[l.sid]={...NEWST});
-    if(l.kind==="try"){x.tries++;x.best=Math.max(x.best,+l.score||0);x.last=l.date;
-      if(l.result==="넘김"||l.result==="깜짝실패")x.status="failed";else if(l.result==="통과"&&+l.round>=maxRound(byId(l.sid)))x.status="done";}
-    else if(l.kind==="star")x.star=l.result==="켬";}
+  for(const l of L)applyLog(m,l);
   STC={k,m};return m;}
+
+// ===== 오래된 기록 정리: 휴대폰에는 최근 KEEP_DAYS일 기록만 두고, 그 전은 요약만 보관 (전체 기록은 구글 시트에 그대로) =====
+const KEEP_DAYS=35;
+function emptyArch(){return{n:0,st:{},day:{},sids:{},fail:{}};} // function이라 앱 시작(load) 때도 바로 쓸 수 있음
+function archiveOld(){const cut=addDays(localDate(),-KEEP_DAYS);
+  const old=S.logs.filter(l=>String(l.date)<cut);if(!old.length)return false;
+  const A=S.arch;old.sort((a,b)=>String(a.ts).localeCompare(String(b.ts)));const daySids={};
+  for(const l of old){
+    applyLog(A.st[l.user]||(A.st[l.user]={}),l);
+    const dk=l.user+"|"+l.date+"|"+l.lang;
+    if(l.kind==="time"){const d=A.day[dk]||(A.day[dk]={sec:0,tries:0,pass:0,n:0});d.sec+=+l.sec||0;}
+    if(l.kind==="try"&&!String(l.result).startsWith("깜짝")){const d=A.day[dk]||(A.day[dk]={sec:0,tries:0,pass:0,n:0});d.tries++;if(l.result==="통과")d.pass++;
+      const ds=daySids[dk]||(daySids[dk]=new Set());if(!ds.has(l.sid)){ds.add(l.sid);d.n++;}
+      const sk=l.user+"|"+l.lang;const arr=A.sids[sk]||(A.sids[sk]=[]);if(!arr.includes(l.sid))arr.push(l.sid);}
+    if(l.kind==="try"&&(l.result==="실패"||l.result==="넘김")){const fk=l.user+"|"+l.lang+"|"+l.sid;A.fail[fk]=(A.fail[fk]||0)+1;}
+    A.n++;}
+  S.logs=S.logs.filter(l=>String(l.date)>=cut);STC={k:"",m:{}};return true;}
+// 보관된 요약 꺼내기 (user, 언어 필터, 조건 함수(날짜))
+function archDays(user,slang,fn){const out=[];for(const k in S.arch.day){const [u,d,lg]=k.split("|");if(u===user&&(slang==="all"||lg===slang)&&(!fn||fn(d)))out.push([d,S.arch.day[k]]);}return out;}
 function myPeek(sid){return stMap()[sid]||NEWST;}
 
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),2600);}
@@ -465,11 +487,12 @@ async function sync(manual){
       let todo=S.outbox.filter(can);
       while(todo.length){const chunk=todo.slice(0,150);const r=await postJSON(url,{ops:chunk});if(!r.ok)throw new Error(r.error||"저장 실패");
         const sent=new Set(chunk);S.outbox=S.outbox.filter(o=>!sent.has(o));todo=todo.slice(chunk.length);save();}
-      let r=await getJSON(qs(url,{action:"pull",from:S.logRow}));if(bad(r))throw new Error(badMsg(r));
-      if(r.total<S.logRow){r=await getJSON(qs(url,{action:"pull",from:0}));if(bad(r))throw new Error(badMsg(r));S.logs=[];}
+      let full=S.logRow===0;let r=await getJSON(qs(url,{action:"pull",from:S.logRow}));if(bad(r))throw new Error(badMsg(r));
+      if(r.total<S.logRow){r=await getJSON(qs(url,{action:"pull",from:0}));if(bad(r))throw new Error(badMsg(r));full=true;}
+      if(full){S.logs=[];S.arch=emptyArch();} // 시트에서 전체 기록을 다시 받으니 요약을 새로 만듦
       const map=new Map(S.logs.map(l=>[l.id,l]));r.logs.forEach(l=>map.set(l.id,l));
       S.outbox.forEach(o=>{if(o.op==="log"&&!map.has(o.row.id))map.set(o.row.id,o.row);});
-      S.logs=[...map.values()];S.logRow=r.total;S.sentences=r.sentences;S.serverV=r.v||1;
+      S.logs=[...map.values()];archiveOld();S.logRow=r.total;S.sentences=r.sentences;S.serverV=r.v||1;
       if(Array.isArray(r.decks)){let D=r.decks;S.outbox.forEach(o=>{if(o.op==="deckUpsert"){D=D.filter(d=>d.id!==o.d.id);D.push(o.d);}else if(o.op==="deckDelete")D=D.filter(d=>d.id!==o.id);});S.decks=D;}
       if(!S.outbox.some(o=>S.serverV>=2||!V2OP(o)))break;
     }
@@ -911,8 +934,13 @@ function renderP(){
 function inPeriod(date,period){const td=localDate();if(period==="today")return date===td;if(period==="week")return date>=mondayOf(td)&&date<=td;if(period==="month")return date.slice(0,7)===td.slice(0,7);return true;}
 function sumUser(user,logs){const mine=logs.filter(l=>l.user===user);const tries=mine.filter(l=>l.kind==="try"&&!String(l.result).startsWith("깜짝"));
   const sec=mine.filter(l=>l.kind==="time").reduce((a,l)=>a+(+l.sec||0),0);const pass=tries.filter(l=>l.result==="통과").length;
-  return{sec,tries:tries.length,pass,sents:new Set(tries.map(l=>l.sid)).size,rate:tries.length?Math.round(pass/tries.length*100):0};}
-function activeDays(user){return new Set(S.logs.filter(l=>l.user===user&&(l.kind==="try"||l.kind==="time")).map(l=>l.date));}
+  return{sec,tries:tries.length,pass,sents:new Set(tries.map(l=>l.sid)).size,sidSet:new Set(tries.map(l=>l.sid)),rate:tries.length?Math.round(pass/tries.length*100):0};}
+// "전체" 기간이면 정리된 옛 기록 요약도 더함
+function withArch(x,user,slang){let{sec,tries,pass,sidSet}=x;sidSet=new Set(sidSet);
+  archDays(user,slang).forEach(([,d])=>{sec+=d.sec;tries+=d.tries;pass+=d.pass;});
+  for(const k in S.arch.sids){const [u,lg]=k.split("|");if(u===user&&(slang==="all"||lg===slang))S.arch.sids[k].forEach(id=>sidSet.add(id));}
+  return{sec,tries,pass,sents:sidSet.size,sidSet,rate:tries?Math.round(pass/tries*100):0};}
+function activeDays(user){const set=new Set(S.logs.filter(l=>l.user===user&&(l.kind==="try"||l.kind==="time")).map(l=>l.date));archDays(user,"all").forEach(([d,x])=>{if(x.tries||x.sec)set.add(d);});return set;}
 function streak(user){const set=activeDays(user);let d=localDate();if(!set.has(d))d=addDays(d,-1);let n=0;while(set.has(d)){n++;d=addDays(d,-1);}return n;}
 function cheer(){const td=S.logs.filter(l=>l.date===localDate()&&l.kind==="try");const n=new Set(td.map(l=>l.user+l.sid)).size;
   if(!n)return"오늘도 같이 두근두근 공부해 볼까요? 💗";if(n<10)return`오늘 둘이 합쳐 ${n}문장! 좋은 출발이에요 ✨`;if(n<30)return`오늘 둘이 합쳐 ${n}문장! 잘하고 있어요 👏`;return`오늘 둘이 합쳐 ${n}문장!! 최고의 커플 스터디 🏆`;}
@@ -966,10 +994,11 @@ function renderStats(){
   const ui=S.ui;if(!ui.who)ui.who=S.me||USERS[0];
   const logs=S.logs.filter(l=>(ui.slang==="all"||l.lang===ui.slang));
   const pl=logs.filter(l=>inPeriod(l.date,ui.period));
-  const st=USERS.map(u=>sumUser(u,pl));
+  const st=USERS.map(u=>ui.period==="all"?withArch(sumUser(u,pl),u,ui.slang):sumUser(u,pl));
   const rows=[["⏱ 공부 시간",st.map(x=>fmtTime(x.sec))],["📚 연습 문장",st.map(x=>x.sents+"개")],["🎯 시도 횟수",st.map(x=>x.tries+"번")],["✅ 통과율",st.map(x=>x.tries?x.rate+"%":"-")],["🔥 연속 공부",USERS.map(u=>streak(u)+"일")]];
   // TOP5
   const cnt={};pl.filter(l=>l.user===ui.who&&l.kind==="try"&&(l.result==="실패"||l.result==="넘김")).forEach(l=>{cnt[l.sid]=cnt[l.sid]||{n:0,text:l.text};cnt[l.sid].n++;});
+  if(ui.period==="all")for(const k in S.arch.fail){const [u,lg,sid]=k.split("|");const s0=byId(sid);if(u===ui.who&&s0&&(ui.slang==="all"||lg===ui.slang)){cnt[sid]=cnt[sid]||{n:0,text:plainText(s0.lang,s0.text)};cnt[sid].n+=S.arch.fail[k];}}
   TOP=Object.entries(cnt).sort((a,b)=>b[1].n-a[1].n).slice(0,5).map(([sid,v])=>({sid,...v}));
   $("#view").innerHTML=`
   <div class="card">
@@ -1011,6 +1040,8 @@ function monthCalHTML(user,logs){
   logs.filter(l=>l.user===user&&String(l.date).slice(0,7)===ym).forEach(l=>{
     if(l.kind==="time")sec[l.date]=(sec[l.date]||0)+(+l.sec||0);
     if(l.kind==="try"&&!String(l.result).startsWith("깜짝")){tries[l.date]=(tries[l.date]||0)+1;if(l.result==="통과")pass[l.date]=(pass[l.date]||0)+1;(sids[l.date]=sids[l.date]||new Set()).add(l.sid);}});
+  // 정리된 옛 기록(요약)도 달력에 표시
+  archDays(user,S.ui.slang||"all",d=>d.slice(0,7)===ym).forEach(([d,x])=>{sec[d]=(sec[d]||0)+x.sec;tries[d]=(tries[d]||0)+x.tries;pass[d]=(pass[d]||0)+x.pass;const st=sids[d]||(sids[d]=new Set());for(let i=0;i<x.n;i++)st.add("arch"+i+"|"+d+x.n);});
   let cells=["월","화","수","목","금","토","일"].map(w=>`<div class="wd">${w}</div>`).join("")+"<div></div>".repeat(lead);let mSec=0,mDays=0;
   for(let d=1;d<=days;d++){const ds=ym+"-"+pad(d);const mn=Math.round((sec[ds]||0)/60);mSec+=sec[ds]||0;if(mn||tries[ds])mDays++;
     const lv=mn>=30?1:mn>=15?.7:mn>=5?.45:(mn||tries[ds])?.22:0;
