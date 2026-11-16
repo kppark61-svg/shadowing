@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v20";const APP_DATE="2026-11-16";
+const APP_VERSION="v21";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -387,7 +387,10 @@ const SAMPLE_JA=[
 function seed(){return[...SAMPLE_EN.map((x,i)=>({id:"s-en-"+(i+1),lang:"en",cat:x[0],text:x[1],reading:"",ko:x[2],memo:""})),
   ...SAMPLE_JA.map((x,i)=>({id:"s-ja-"+(i+1),lang:"ja",cat:x[0],text:x[1],reading:x[2],ko:x[3],memo:""}))];}
 const KEY="dokidoki-v2";
-const DEF_SET={threshold:80,maxFail:3,accent:"en-US",voiceEn:"",voiceJa:"",voiceKo:"",speed:"normal",quiz:{on:true,mode:"random",every:3,pct:30},record:false,readBack:true,sfx:true,showKo:true,showRead:true,sheetUrl:""};
+// 기본 연결값: 처음 켜거나 저장값이 지워져도 따로 입력 없이 바로 작동
+const DEFAULT_SHEET_URL="https://script.google.com/macros/s/AKfycbwD7F7t6hZntilV8UviiyCATtuPH5SfFGFZxvQKXhvvDxy04R9wAToH2_aVywiStt0/exec";
+const DEFAULT_SPEECH_CODE="1111111111111111";
+const DEF_SET={threshold:80,maxFail:3,accent:"en-US",voiceEn:"",voiceJa:"",voiceKo:"",speed:"normal",quiz:{on:true,mode:"random",every:3,pct:30},record:false,readBack:true,sfx:true,showKo:true,showRead:true,sheetUrl:DEFAULT_SHEET_URL};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -396,7 +399,7 @@ const localDate=(d=new Date())=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(
 const addDays=(ds,n)=>{const d=new Date(ds+"T00:00:00");d.setDate(d.getDate()+n);return localDate(d);};
 const mondayOf=ds=>{const d=new Date(ds+"T00:00:00");const w=(d.getDay()+6)%7;d.setDate(d.getDate()-w);return localDate(d);};
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
-function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.sentences)){d.settings={...DEF_SET,...(d.settings||{})};d.ui={...defUI(),...(d.ui||{})};d.decks=d.decks||[];d.serverV=d.serverV||0;if(d.pos&&!d.pos.queue)d.pos=null;delete d.my;return d;}}catch(e){}return null;}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.sentences)){d.settings={...DEF_SET,...(d.settings||{})};if(!d.settings.sheetUrl)d.settings.sheetUrl=DEFAULT_SHEET_URL;d.ui={...defUI(),...(d.ui||{})};d.decks=d.decks||[];d.serverV=d.serverV||0;if(d.pos&&!d.pos.queue)d.pos=null;delete d.my;return d;}}catch(e){}return null;}
 function defUI(){return{period:"today",slang:"all",days:7,who:null};}
 let S=load()||{me:null,lang:"en",settings:{...DEF_SET},sentences:seed(),pos:null,decks:[],serverV:0,logs:[],outbox:[],connected:false,logRow:0,lastSync:"",syncErr:"",ui:defUI()};
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){toast("저장 공간이 부족해요");}}
@@ -535,6 +538,7 @@ const SPEECH_MAX_MS=30000; // 한 번에 말할 수 있는 최대 시간
 const SPEECH_CODE_KEY="dokidoki-speech-code";
 const SPEECH={token:null,loading:null,code:"",message:""};
 try{SPEECH.code=localStorage.getItem(SPEECH_CODE_KEY)||sessionStorage.getItem(SPEECH_CODE_KEY)||"";}catch(e){}
+if(!SPEECH.code)SPEECH.code=DEFAULT_SPEECH_CODE;
 // 시트 주소의 스크립트에 토큰 기능이 없을 수도 있어서, 기본 주소로 한 번 더 시도해요.
 const speechUrls=()=>[...new Set([S.settings.sheetUrl,SPEECH_URL].filter(Boolean))];
 function saveSpeechCode(){
@@ -737,7 +741,7 @@ function errMsg(e){const c=e&&e.error;
   const d=e&&e.detail?` [${String(e.detail).slice(0,120)}]`:"";
   if(c==="not-allowed"||c==="service-not-allowed")return"마이크 권한을 허용해 주세요. 아이폰은 설정 > 앱 > Safari > 마이크, 또는 사파리 주소창의 '가가' > 웹사이트 설정에서 허용할 수 있어요.";
   if(c==="unsupported")return"마이크를 쓸 수 없는 환경이에요. https 주소에서 사파리나 크롬으로 열어 주세요.";
-  if(c==="speech-code")return"설정 → Azure 음성인식에서 연결 암호를 입력하고 저장해 주세요."+(SPEECH.code?" (지금 암호가 틀렸어요)":"");
+  if(c==="speech-code")return"Azure 연결 암호가 서버와 맞지 않아요. (Apps Script의 암호를 바꿨다면 앱 코드의 DEFAULT_SPEECH_CODE도 같이 바꿔야 해요)";
   if(c==="speech-config")return"음성인식 서버(Apps Script)에 Azure 키 설정이 없어요."+d;
   if(c==="token-network")return"음성인식 서버(Apps Script)에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.";
   if(c==="token-server")return"음성인식 서버(Apps Script) 응답이 이상해요."+d;
@@ -1152,13 +1156,11 @@ function renderSettings(){
     <label class="f">Apps Script 웹 앱 주소</label><input type="url" id="sheetUrl" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(st.sheetUrl)}">
     <div class="row" style="margin-top:10px"><button class="btn sm" onclick="testUrl()">연결 테스트</button><button class="btn sm pri" onclick="saveUrl()">저장하고 연결</button><button class="btn sm" onclick="sync(true)">지금 동기화</button></div>
     <div class="muted small" style="margin-top:10px">${syncLine()}</div>
-    <div class="muted small" style="margin-top:6px">아이폰은 사파리와 홈 화면 앱의 저장 공간이 따로라서, 홈 화면에 추가한 뒤에 앱 안에서도 주소를 한 번 넣어 주세요.</div></div>
+    <div class="muted small" style="margin-top:6px">기본 주소가 미리 들어가 있어서 따로 넣지 않아도 돼요.</div></div>
   <div class="card"><h2>🎙 Azure 음성인식</h2>
     <p class="muted small">영어·일본어 음성인식은 Microsoft Azure를 사용해요. 말할 때 마이크 권한과 인터넷 연결이 필요하고, 음성이 Azure로 전송돼요.</p>
-    <label class="f" for="speechCode">연결 암호</label><input type="password" id="speechCode" autocomplete="off" placeholder="정해 둔 연결 암호" value="${esc(SPEECH.draft??SPEECH.code)}" oninput="SPEECH.draft=this.value">
-    <div class="row" style="margin-top:10px"><button class="btn sm pri" onclick="saveSpeechCode()">암호 저장</button><button class="btn sm" onclick="testSpeechConnection()" ${SPEECH.testing?"disabled":""}>연결 테스트</button>${SPEECH.code?`<button class="btn sm" onclick="forgetSpeechCode()">암호 지우기</button>`:""}</div>
-    <p class="muted small" role="status">${esc(SPEECH.message||(SPEECH.code?"연결 암호가 저장돼 있어요.":"연결 암호를 입력하고 저장해 주세요."))}</p>
-    <p class="muted small">연결 암호는 이 기기에 저장돼서 앱을 닫아도 남아요. 아이폰은 사파리와 홈 화면 앱이 따로라서 각각 한 번씩 넣어 주세요.</p></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" onclick="testSpeechConnection()" ${SPEECH.testing?"disabled":""}>연결 테스트</button></div>
+    ${SPEECH.message?`<p class="muted small" role="status">${esc(SPEECH.message)}</p>`:""}</div>
   <div class="card"><h2>연습</h2>
     <div class="set" style="display:block"><div class="row" style="justify-content:space-between"><div class="t">통과 기준</div><b class="fun" style="font-weight:400">${st.threshold}점</b></div>
       <input type="range" min="50" max="100" step="5" value="${st.threshold}" oninput="this.previousElementSibling.lastElementChild.textContent=this.value+'점'" onchange="setS('threshold',+this.value)">
