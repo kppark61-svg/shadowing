@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v24";const APP_DATE="2026-11-16";
+const APP_VERSION="v25";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -228,7 +228,10 @@ function fixSpacingEn(target,heard){
   for(let i=0;i<target.length-1;i++)P2.set(target[i]+target[i+1],[target[i],target[i+1]]);
   const out=[];
   for(let i=0;i<heard.length;i++){const h=heard[i],nx=heard[i+1];
-    if(nx&&T.has(h+nx)&&!(T.has(h)&&T.has(nx))){out.push(h+nx);i++;}
+    const n2=heard[i+2],n3=heard[i+3];
+    if(nx&&n2&&n3&&h.length===1&&T.has(h+nx+n2+n3)){out.push(h+nx+n2+n3);i+=3;}
+    else if(nx&&n2&&h.length===1&&T.has(h+nx+n2)){out.push(h+nx+n2);i+=2;}
+    else if(nx&&T.has(h+nx)&&!(T.has(h)&&T.has(nx))){out.push(h+nx);i++;}
     else if(!T.has(h)&&P2.has(h))out.push(...P2.get(h));
     else out.push(h);}
   return out;
@@ -668,7 +671,10 @@ function listen(lang){return new Promise((resolve,reject)=>{
     sdk.SpeechRecognizer.enableTelemetry(false);
     recognizer=new sdk.SpeechRecognizer(config,audio);
     // 지금 문장의 단어를 Azure에 미리 알려줘서 비슷한 소리(supply/supplier 등)를 덜 헷갈리게
-    try{const cs=cur();if(cs&&cs.lang===lang&&sdk.PhraseListGrammar){const pl=sdk.PhraseListGrammar.fromRecognizer(recognizer);const full=plainText(cs.lang,cs.text);pl.addPhrase(full);if(cs.lang==="en")[...new Set(full.split(/\s+/).map(w=>w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,"")).filter(w=>w.length>=4))].forEach(w=>pl.addPhrase(w));}}catch(e){}
+    try{const cs=cur();if(cs&&cs.lang===lang&&sdk.PhraseListGrammar){const pl=sdk.PhraseListGrammar.fromRecognizer(recognizer);const full=plainText(cs.lang,cs.text);pl.addPhrase(full);if(cs.lang==="en"){const ws=full.split(/\s+/).map(w=>w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,"")).filter(Boolean);const ph=new Set();
+      ws.forEach((w,i)=>{if(w.length>=4||/^[A-Z]{2,}s?$/.test(w))ph.add(w); // 긴 단어와 약어(RFI, NDA, MOQ…)
+        if(i+1<ws.length)ph.add(ws[i]+" "+ws[i+1]);if(i+2<ws.length)ph.add(ws[i]+" "+ws[i+1]+" "+ws[i+2]);}); // 2~3단어 묶음: "we send an", "an RFI"
+      ph.forEach(w=>pl.addPhrase(w));}}}catch(e){}
     recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(stop,SPEECH_MAX_MS);armQuiet(SPEECH_START_SILENCE_MS);sfx("go");
       const r3=(P.round===3&&!P.review)||!!P.quiz;setStatus("speak",r3?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");};
     recognizer.recognizing=(_,event)=>{if(done)return;partial=event.result.text||"";showHeard();armQuiet(allSaid()?SPEECH_DONE_MS:SPEECH_PAUSE_MS);};
