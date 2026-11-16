@@ -152,15 +152,19 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 #splash .bg{position:absolute;inset:-30px;background:url(splash.webp) center/cover no-repeat;filter:blur(24px) saturate(1.2);opacity:.55}
 #splash img{position:relative;max-width:100%;max-height:100%;width:auto;height:100%;object-fit:contain;animation:splashIn .7s ease-out both}
 #splash.out{opacity:0;pointer-events:none}
+#splash .ver{position:absolute;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom));text-align:center;font-size:13px;font-weight:600;color:#8c7a80;text-shadow:0 1px 2px #fff}
 @keyframes splashIn{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){#splash img{animation:none}#splash{transition:none}}
 </style>
 </head>
 <body>
-<div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"></div>
+<div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
+// 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
+const APP_VERSION="v18";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
+  document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
   const hide=()=>{if(gone)return;gone=true;el.classList.add("out");setTimeout(()=>el.remove(),600);};
   el.addEventListener("click",hide);setTimeout(hide,4000);})();
 </script>
@@ -1166,7 +1170,8 @@ function renderSettings(){
     <div class="set"><div class="t">🇰🇷 한국어<div class="d">3회차에서 뜻을 읽어 줄 때</div></div><select style="width:150px" onchange="setS('voiceKo',this.value)"><option value="">자동</option>${voicesFor("ko").map(v=>`<option ${v.name===st.voiceKo?"selected":""}>${esc(v.name)}</option>`).join("")}</select><button class="btn sm" onclick="speak('안녕하세요. 오늘도 화이팅!','ko')">🔊</button></div></div>
   <div class="card"><h2>데이터</h2>
     <div class="grid2"><button class="btn" onclick="resetMine()">내 완료·틀림 표시 초기화</button><button class="btn danger" onclick="resetAll()">예시로 초기화</button></div>
-    <p class="muted small">공부 기록(시간·점수)은 구글 시트에 남아요. 시트를 연결하지 않으면 이 기기에만 저장돼요.</p></div>`;
+    <p class="muted small">공부 기록(시간·점수)은 구글 시트에 남아요. 시트를 연결하지 않으면 이 기기에만 저장돼요.</p></div>
+  <p class="muted small" style="text-align:center">앱 버전 ${APP_VERSION} · ${APP_DATE}</p>`;
 }
 function resetMine(){if(!confirm("내 완료·틀림 표시를 처음 상태로 돌릴까요? (공부 기록·별표는 그대로)"))return;addLog({kind:"reset",lang:S.lang,result:"초기화"});S.pos=null;save();toast("초기화했어요");}
 function resetAll(){if(S.settings.sheetUrl){toast("시트가 연결돼 있어요. 문장은 구글 시트에서 직접 정리해 주세요");return;}
