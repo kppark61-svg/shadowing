@@ -1,5 +1,5 @@
 // 오프라인 실행용 서비스워커 — 앱 파일을 고치면 VERSION 숫자를 올려 주세요 (index.html의 APP_VERSION도 같이)
-const VERSION = "dokidoki-v21";
+const VERSION = "dokidoki-v22";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png", "./splash.webp"];
 const CDN = /^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.sheetjs\.com|cdn\.jsdelivr\.net)\//;
 
