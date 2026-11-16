@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v25";const APP_DATE="2026-11-16";
+const APP_VERSION="v26";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -243,8 +243,33 @@ function fixEndingsEn(target,heard){const T=new Set(target);
     for(const t of T){if(t.length<3&&h.length<3)continue;
       for(const e of ENDINGS){if(h===t+e||t===h+e)return t;}}
     return h;});}
+// 약어(RFI, NDA, MOQ…)를 Azure가 비슷한 소리 단어로 받아 적은 경우 맞춰 주기
+// 예: "an RFI" → "another file", "one other file", "on our app file"
+const LETTER_SOUND={a:"a ay eh hey eight",b:"b be bee",c:"c see sea she",d:"d de dee the",e:"e ee he",f:"f ef eff if of app at",
+  i:"i eye aye ai im file fly five",m:"m em am um",n:"n en and in",o:"o oh owe",p:"p pe pee pea",q:"q cue queue cute kyu que",
+  r:"r are our ar or other her art",s:"s es ess yes",t:"t tea tee ti",u:"u you yu",v:"v vee",x:"x ex"};
+const LETTER_PAIR={fi:"fi fly file files five flight fight",po:"po poe pole",rf:"rf",nd:"nd",oq:"oq"};
+function fixAcronymsEn(units,target,heard){
+  const acr=units.map(u=>u.t.replace(/[^A-Za-z]/g,"")).filter(w=>/^[A-Z]{2,4}s?$/.test(w)).map(w=>w.toLowerCase().replace(/s$/,""));
+  if(!acr.length)return heard;
+  const one=(tok,ch)=>(LETTER_SOUND[ch]||ch).split(" ").includes(tok);
+  const two=(tok,a,b)=>(LETTER_PAIR[a+b]||"").split(" ").includes(tok);
+  let h=heard.flatMap(t=>t==="another"&&target.includes("an")?["an","other"]:[t]); // "another" = "an" + R
+  for(const ac of acr){if(h.includes(ac))continue;const L=[...ac];
+    for(let i=0;i<h.length;i++){
+      // 토큰 i부터 최대 4개로 약어 글자를 전부 덮을 수 있는지
+      const go=(ti,li)=>{if(li===L.length)return ti;if(ti>=h.length||ti-i>=4)return -1;
+        if(one(h[ti],L[li])){const r=go(ti+1,li+1);if(r>=0)return r;}
+        if(li+1<L.length&&two(h[ti],L[li],L[li+1])){const r=go(ti+1,li+2);if(r>=0)return r;}
+        return -1;};
+      const end=go(i,0);
+      if(end>i&&end-i>=1&&!(end-i===1&&!two(h[i],L[0],L[1]||"")&&h[i]!==ac)){
+        const prev=h[i-1];const tIdx=target.indexOf(ac);
+        if(prev&&tIdx>0&&target[tIdx-1]==="an"&&["one","1","on","and","in","a","uh"].includes(prev))h[i-1]="an";
+        h=[...h.slice(0,i),ac,...h.slice(end)];break;}}}
+  return h;}
 function scoreEn(units,heard){const target=units.flatMap(u=>normWord(u.t));
-  const r=scoreUnits(units,normWord,fixEndingsEn(target,fixSpacingEn(target,String(heard||"").split(/\s+/).flatMap(normWord))));return{pct:r.pct,line:"text",unitOk:r.ok};}
+  const r=scoreUnits(units,normWord,fixEndingsEn(target,fixAcronymsEn(units,target,fixSpacingEn(target,String(heard||"").split(/\s+/).flatMap(normWord)))));return{pct:r.pct,line:"text",unitOk:r.ok};}
 
 // ---------- 일본어 ----------
 const kataToHira=s=>String(s).replace(/[ァ-ヶ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));
