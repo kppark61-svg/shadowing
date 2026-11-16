@@ -89,7 +89,10 @@ h2{font-family:var(--fun);font-weight:400;font-size:18px;margin:4px 0 12px}
 .status.ok,.status.done{background:var(--okbg);color:var(--ok)}
 .status.bad{background:var(--badbg);color:var(--bad)}
 .status.warn{background:var(--warnbg);color:var(--warn)}
-.heard{font-size:14px;color:var(--sub);min-height:20px;margin-top:6px}
+.heard{font-size:17px;font-weight:600;color:#2f6fd6;min-height:22px;margin-top:8px;line-height:1.45}
+.sent.live .w{color:#c4b7bc}
+.sent.live .w.blank{color:var(--pri)}
+.sent .w.said,.sent.live .w.said{color:#2f6fd6}
 .score{font-family:var(--fun);font-size:44px;text-align:center;margin:4px 0 0}
 .dots{letter-spacing:4px;color:var(--pri);font-size:14px}
 .ctrl{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
@@ -574,7 +577,7 @@ function listen(lang){return new Promise((resolve,reject)=>{
   const finals=[];let partial="";
   const joined=k=>finals.map(f=>f[k]).filter(Boolean).join(" ");
   const altsNow=()=>{const a=[joined("display"),joined("lexical")];if(partial)a.unshift((joined("display")+" "+partial).trim());return[...new Set(a.map(x=>x.trim()).filter(Boolean))];};
-  const showHeard=()=>{P.interim=(joined("display")+" "+partial).trim();const el=$("#heard");if(el)el.textContent="🗣 "+P.interim;};
+  const showHeard=()=>{P.interim=(joined("display")+" "+partial).trim();updateLive();};
   const controller=new AbortController();
   const finish=(error,alts=[])=>{
     if(done)return;done=true;clearTimeout(hard);clearTimeout(prepareTimer);clearTimeout(quiet);controller.abort();
@@ -793,10 +796,19 @@ function pRead(){P.showRead=!P.showRead;renderP();}
 function pPlayRec(){if(P.recUrl){stopP();new Audio(P.recUrl).play().catch(()=>toast("재생할 수 없어요"));}}
 function blankOf(t){return[...t].map(c=>/[\s。、！？!?.,]/.test(c)?c:(/[　-鿿＀-￯]/.test(c)?"＿":"_")).join("");}
 function hintOf(t){let first=true;return[...t].map(c=>{if(/[\s。、！？!?.,"'’]/.test(c))return c;if(first){first=false;return c;}return/[　-鿿＀-￯]/.test(c)?"＿":"_";}).join("");}
+// 노래방 자막: 말하는 동안 맞게 말한 단어를 파랗게 (못 맞춘 단어는 회색으로 남음)
+function liveHits(s,pr){
+  if(P.result||P.status!=="speak"||!P.interim)return null;
+  try{const x=scoreAny(s.lang,pr.units,s.reading,P.interim);return x.line==="text"?x.unitOk:null;}catch(e){return null;}}
+function isLive(){return !P.result&&P.status==="speak";}
+function updateLive(){const s=cur();if(!s||view!=="practice")return;const pr=getPrep();
+  const se=$("#sent");if(se){se.innerHTML=sentHTML(s,pr);se.classList.toggle("live",isLive());}
+  const h=$("#heard");if(h)h.textContent=P.interim?"🗣 "+P.interim:"";}
 function sentHTML(s,pr){
-  const r=P.result,r3=(P.round===3&&!P.review)||!!P.quiz;
+  const r=P.result,r3=(P.round===3&&!P.review)||!!P.quiz;const live=liveHits(s,pr);
   return pr.units.map((u,i)=>{let cls="w",txt=esc(u.t);const isB=pr.blanks.has(i);
-    if(r){if(r.line==="text")cls+=r.unitOk[i]?" ok":" bad";if(isB)cls+=" was-blank";}
+    if(live&&live[i]){cls+=" said";}
+    else if(r){if(r.line==="text")cls+=r.unitOk[i]?" ok":" bad";if(isB)cls+=" was-blank";}
     else if(isB&&!P.peek){txt=esc(r3&&P.hint?hintOf(u.t):blankOf(u.t));cls+=" blank";}
     else if(isB)cls+=" peek";
     return`<span class="${cls}">${txt}</span>`;}).join(pr.sep);}
@@ -828,7 +840,7 @@ function renderP(){
       <span class="dots">${"♥".repeat(P.fails)}${"♡".repeat(Math.max(0,max-P.fails))}</span></div>`}
     ${P.review?`<div style="margin-top:10px"><span class="chip done">📖 정답 따라 하기 (복습)</span></div>`:""}
     ${r3?`<div class="fun" style="font-size:21px;margin-top:14px">🇰🇷 ${esc(s.ko)}</div><div class="muted small">이 뜻을 ${s.lang==="ja"?"일본어":"영어"}로 말해 보세요</div>`:""}
-    <div class="sent ${ja?"ja":""}" lang="${s.lang}">${sentHTML(s,pr)}</div>
+    <div class="sent ${ja?"ja":""} ${isLive()?"live":""}" id="sent" lang="${s.lang}">${sentHTML(s,pr)}</div>
     ${readVisible?`<div class="read" lang="ja">${readHTML(s)}</div><div class="roma">${esc(romajiLine(s.reading))}</div>`:""}
     ${ja&&s.reading&&P.showRead&&P.round===2&&!P.peek&&!r?`<div class="muted small">2회차는 읽기가 숨겨져요 (👀 빈칸 보기로 확인)</div>`:""}
     ${!r3&&P.showKo&&s.ko?`<div class="ko">${esc(s.ko)}</div>`:""}
