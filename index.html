@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v18";const APP_DATE="2026-11-16";
+const APP_VERSION="v19";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -522,6 +522,7 @@ const SPEECH_URL="https://script.google.com/macros/s/AKfycbwD7F7t6hZntilV8UviiyC
 const SPEECH_SDK_URL="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.53.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
 const SPEECH_START_SILENCE_MS=7000; // 말 시작을 기다리는 시간
 const SPEECH_PAUSE_MS=4000; // 말하다가 이만큼 조용하면 다 말한 걸로 봄 (중간에 고민해도 이 시간까진 기다림)
+const SPEECH_DONE_MS=300; // 문장을 다 맞게 말했을 때 바로 끝내기 전 잠깐 여유
 const SPEECH_MAX_MS=30000; // 한 번에 말할 수 있는 최대 시간
 const SPEECH_CODE_KEY="dokidoki-speech-code";
 const SPEECH={token:null,loading:null,code:"",message:""};
@@ -595,6 +596,8 @@ function listen(lang){return new Promise((resolve,reject)=>{
   const finals=[];let partial="";
   const joined=k=>finals.map(f=>f[k]).filter(Boolean).join(" ");
   const altsNow=()=>{const a=[joined("display"),joined("lexical")];if(partial)a.unshift((joined("display")+" "+partial).trim());return[...new Set(a.map(x=>x.trim()).filter(Boolean))];};
+  // 노래방이 다 채워지면(100점) 4초 기다리지 않고 바로 끝냄
+  const allSaid=()=>{try{const cs=cur();if(!cs||cs.lang!==lang||!P.interim)return false;return scoreAny(cs.lang,getPrep().units,cs.reading,P.interim).pct>=100;}catch(e){return false;}};
   const showHeard=()=>{P.interim=(joined("display")+" "+partial).trim();updateLive();};
   const controller=new AbortController();
   const finish=(error,alts=[])=>{
@@ -626,10 +629,10 @@ function listen(lang){return new Promise((resolve,reject)=>{
     try{const cs=cur();if(cs&&cs.lang===lang&&sdk.PhraseListGrammar){const pl=sdk.PhraseListGrammar.fromRecognizer(recognizer);const full=plainText(cs.lang,cs.text);pl.addPhrase(full);if(cs.lang==="en")[...new Set(full.split(/\s+/).map(w=>w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,"")).filter(w=>w.length>=4))].forEach(w=>pl.addPhrase(w));}}catch(e){}
     recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(stop,SPEECH_MAX_MS);armQuiet(SPEECH_START_SILENCE_MS);sfx("go");
       const r3=(P.round===3&&!P.review)||!!P.quiz;setStatus("speak",r3?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");};
-    recognizer.recognizing=(_,event)=>{if(done)return;partial=event.result.text||"";showHeard();armQuiet(SPEECH_PAUSE_MS);};
+    recognizer.recognizing=(_,event)=>{if(done)return;partial=event.result.text||"";showHeard();armQuiet(allSaid()?SPEECH_DONE_MS:SPEECH_PAUSE_MS);};
     recognizer.recognized=(_,event)=>{if(done)return;const r=event.result;
       if(r.reason===sdk.ResultReason.RecognizedSpeech&&r.text){let lex="";try{const d=JSON.parse(r.json);lex=(d.NBest&&d.NBest[0]&&d.NBest[0].Lexical)||"";}catch(e){}
-        finals.push({display:r.text,lexical:lex});partial="";showHeard();armQuiet(SPEECH_PAUSE_MS);}};
+        finals.push({display:r.text,lexical:lex});partial="";showHeard();armQuiet(allSaid()?SPEECH_DONE_MS:SPEECH_PAUSE_MS);}};
     const cancelError=event=>{
       if(event.reason!==sdk.CancellationReason.Error)return null;
       if(event.errorCode===sdk.CancellationErrorCode.AuthenticationFailure){SPEECH.token=null;return {error:"azure-auth",detail:event.errorDetails};}
