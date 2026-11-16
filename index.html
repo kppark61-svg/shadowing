@@ -214,7 +214,19 @@ function blankIdxEn(words){
   const k=Math.max(1,Math.round(words.length*0.35));c.sort((x,y)=>y.len-x.len||x.i-y.i);
   return new Set(c.slice(0,Math.min(k,c.length)).map(x=>x.i));
 }
-function scoreEn(units,heard){const r=scoreUnits(units,normWord,String(heard||"").split(/\s+/).flatMap(normWord));return{pct:r.pct,line:"text",unitOk:r.ok};}
+// 띄어쓰기만 다른 경우 맞춰 주기: "on board"↔"onboard", "every day"↔"everyday"
+function fixSpacingEn(target,heard){
+  const T=new Set(target),P2=new Map();
+  for(let i=0;i<target.length-1;i++)P2.set(target[i]+target[i+1],[target[i],target[i+1]]);
+  const out=[];
+  for(let i=0;i<heard.length;i++){const h=heard[i],nx=heard[i+1];
+    if(nx&&T.has(h+nx)&&!(T.has(h)&&T.has(nx))){out.push(h+nx);i++;}
+    else if(!T.has(h)&&P2.has(h))out.push(...P2.get(h));
+    else out.push(h);}
+  return out;
+}
+function scoreEn(units,heard){const target=units.flatMap(u=>normWord(u.t));
+  const r=scoreUnits(units,normWord,fixSpacingEn(target,String(heard||"").split(/\s+/).flatMap(normWord)));return{pct:r.pct,line:"text",unitOk:r.ok};}
 
 // ---------- 일본어 ----------
 const kataToHira=s=>String(s).replace(/[ァ-ヶ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));
@@ -583,6 +595,8 @@ function listen(lang){return new Promise((resolve,reject)=>{
     audio=sdk.AudioConfig.fromStreamInput(mic); // 마이크 MediaStream을 그대로 넘김 (fromStream은 SDK에 없는 함수)
     sdk.SpeechRecognizer.enableTelemetry(false);
     recognizer=new sdk.SpeechRecognizer(config,audio);
+    // 지금 문장의 단어를 Azure에 미리 알려줘서 비슷한 소리(supply/supplier 등)를 덜 헷갈리게
+    try{const cs=cur();if(cs&&cs.lang===lang&&sdk.PhraseListGrammar){const pl=sdk.PhraseListGrammar.fromRecognizer(recognizer);pl.addPhrase(plainText(cs.lang,cs.text));}}catch(e){}
     recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(()=>{try{recognizer.stopContinuousRecognitionAsync();}catch(e){}finish(null,P.interim?[P.interim]:[]);},SPEECH_MAX_MS);
       const r3=(P.round===3&&!P.review)||!!P.quiz;setStatus("speak",r3?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");};
     recognizer.recognizing=(_,event)=>{if(done)return;P.interim=event.result.text||"";const el=$("#heard");if(el)el.textContent="🗣 "+P.interim;};
