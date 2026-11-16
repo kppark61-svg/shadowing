@@ -483,9 +483,9 @@ function sfxTone(c,f,t0,dur,type,vol){const o=c.createOscillator(),g=c.createGai
   g.gain.setValueAtTime(0.0001,t0);g.gain.linearRampToValueAtTime(vol,t0+0.015);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
   o.connect(g);g.connect(c.destination);o.start(t0);o.stop(t0+dur+0.05);}
 function sfx(kind){if(!S.settings.sfx)return;try{const c=sfxCtx();if(!c)return;const t=c.currentTime+0.02;
-  if(kind==="pass"){sfxTone(c,1046.5,t,0.35,"sine",0.10);sfxTone(c,1318.5,t+0.11,0.5,"sine",0.10);} // 도-미: 맑은 딩동
-  else if(kind==="go"){sfxTone(c,1567.98,t,0.18,"sine",0.07);} // 솔(높게): 이제 말하세요 "띵"
-  else{sfxTone(c,392,t,0.28,"triangle",0.09);sfxTone(c,329.6,t+0.16,0.42,"triangle",0.09);}}catch(e){}} // 솔-미: 낮고 부드럽게
+  if(kind==="pass"){sfxTone(c,1046.5,t,0.35,"sine",0.32);sfxTone(c,1318.5,t+0.11,0.5,"sine",0.32);} // 도-미: 맑은 딩동
+  else if(kind==="go"){sfxTone(c,1567.98,t,0.18,"sine",0.26);} // 솔(높게): 이제 말하세요 "띵"
+  else{sfxTone(c,392,t,0.28,"triangle",0.30);sfxTone(c,329.6,t+0.16,0.42,"triangle",0.30);}}catch(e){}} // 솔-미: 낮고 부드럽게
 // 아이폰은 화면을 누른 뒤에만 소리를 낼 수 있어서, 누를 때마다 준비해 둠
 document.addEventListener("pointerdown",()=>{if(S.settings.sfx)sfxCtx();},{passive:true});
 
