@@ -83,8 +83,9 @@ h2{font-family:var(--fun);font-weight:400;font-size:18px;margin:4px 0 12px}
 .roma{font-size:14px;color:var(--sub);font-style:italic;margin-bottom:4px}
 .ko{color:var(--sub);font-size:16px;margin:6px 0}
 .status{border-radius:14px;padding:12px;margin:12px 0 4px;font-family:var(--fun);font-size:16px;background:#f7eded;min-height:46px}
-.status.listen{background:var(--mint2);color:var(--ok)}
-.status.speak{background:var(--pri2);color:#d94a63}
+.status.listen{background:#e3eeff;color:#2f6fd6}
+.status.prep{background:#efe9fb;color:#7356c4}
+.status.speak{background:#c9f0dd;color:#137a52;font-weight:700}
 .status.ok,.status.done{background:var(--okbg);color:var(--ok)}
 .status.bad{background:var(--badbg);color:var(--bad)}
 .status.warn{background:var(--warnbg);color:var(--warn)}
@@ -638,6 +639,7 @@ const ORDER_NAME={seq:"순서대로",shuffle:"섞어서",random:"랜덤"};
 // 진행 속도별 대기 시간(ms): 통과 후 / 틀림 후 / 3회차 틀림·복습 / 넘어가기 / 소리 없음
 const WAITS={slow:{pass:2600,fail:1800,r3:1500,skip:1800,quiet:1200},normal:{pass:1300,fail:1800,r3:1500,skip:1800,quiet:1200},fast:{pass:700,fail:1100,r3:1000,skip:1200,quiet:800}};
 const W=k=>(WAITS[S.settings.speed]||WAITS.normal)[k];
+const READBACK_WAIT_MS=4000; // 정답을 다시 읽어 준 뒤 다음으로 넘어가기 전 기다리는 시간
 const ROUND_NAME=["","전체 문장","빈칸","뜻 보고 말하기"];
 function modeLabel(m){if(!m)return"";
   if(m.kind==="deck"){const d=deckById(m.deckId);return"🃏 "+(d?d.name:"덱");}
@@ -722,12 +724,12 @@ async function cycle(skipTTS){
   const s=cur();if(!s){stopP("문장을 찾을 수 없어요");return;}
   tStart(s.lang);
   const pr=getPrep();const text=plainText(s.lang,s.text);
-  const r3=(P.round===3&&!P.review)||!!P.quiz;
+  const r3=(P.round===3&&!P.review)||!!P.quiz;let rb=false;const WR=k=>rb?READBACK_WAIT_MS:W(k);
   if(!skipTTS){
     if(r3){setStatus("listen","🔊 한국어 뜻을 들려드릴게요");await speak(s.ko,"ko");}
     else{setStatus("listen",P.review?"🔊 정답을 잘 들어 보세요":"🔊 듣는 중…");await speak(text,s.lang);}
     if(g!==P.gen)return;await sleep(200);if(g!==P.gen)return;}
-  setStatus("listen","☁️ 음성인식 준비 중…");
+  setStatus("prep","☁️ 음성인식 준비 중…");
   let res;try{res=await listen(s.lang);}catch(e){if(g!==P.gen)return;stopP(errMsg(e));return;}
   if(g!==P.gen)return;
   const alts=(res.alts||[]).filter(a=>a&&a.trim());
@@ -738,30 +740,30 @@ async function cycle(skipTTS){
   let best=null;for(const a of alts){const r=scoreAny(s.lang,pr.units,s.reading,a);if(!best||r.pct>best.pct)best={...r,heard:a};}
   P.result=best;const pass=best.pct>=S.settings.threshold;const max=S.settings.maxFail;
   // 채점 후 정답 한 번 더 읽어 주기 (깜짝 테스트 실패는 아래에서 바로 정답을 읽어 줘서 건너뜀)
-  if(S.settings.readBack&&!(P.quiz&&!pass)){setStatus(pass?"ok":"bad",(pass?"⭕ ":"❌ ")+best.pct+"점 · 🔊 정답 다시 들어 보세요");await speak(text,s.lang);if(g!==P.gen)return;await sleep(300);if(g!==P.gen)return;}
+  if(S.settings.readBack&&!(P.quiz&&!pass)){setStatus(pass?"ok":"bad",(pass?"⭕ ":"❌ ")+best.pct+"점 · 🔊 정답 다시 들어 보세요");await speak(text,s.lang);if(g!==P.gen)return;rb=true;}
   // ⚡ 깜짝 테스트: 기회 한 번
   if(P.quiz){P.sess.quiz.n++;if(pass)P.sess.quiz.ok++;
     addLog({kind:"try",lang:s.lang,sid:s.id,text,round:3,score:best.pct,result:pass?"깜짝성공":"깜짝실패"});
-    if(pass){setStatus("ok","⚡ 기억하고 있네요!");await sleep(W("pass"));}
-    else{if(!P.sess.failed.includes(s.id))P.sess.failed.push(s.id);save();setStatus("bad","⚡ 아쉬워요! 정답을 들려드릴게요 (틀린 문장에 넣었어요)");await speak(text,s.lang);if(g!==P.gen)return;await sleep(W("fail"));}
+    if(pass){setStatus("ok","⚡ 기억하고 있네요!");await sleep(WR("pass"));}
+    else{if(!P.sess.failed.includes(s.id))P.sess.failed.push(s.id);save();setStatus("bad","⚡ 아쉬워요! 정답을 들려드릴게요 (틀린 문장에 넣었어요)");await speak(text,s.lang);if(g!==P.gen)return;await sleep(S.settings.readBack?READBACK_WAIT_MS:W("fail"));}
     if(g!==P.gen)return;P.quiz=null;P.prep=null;P.result=null;return advance(g);}
   // 3회차 복습: 정답 따라 하기 (실패 횟수에 안 셈)
   if(P.review){
-    if(pass){setStatus("ok","👍 좋아요! 다시 한국어 뜻으로 도전해요");await sleep(W("pass"));if(g!==P.gen)return;P.review=false;P.reviewFails=0;P.prep=null;return cycle();}
+    if(pass){setStatus("ok","👍 좋아요! 다시 한국어 뜻으로 도전해요");await sleep(WR("pass"));if(g!==P.gen)return;P.review=false;P.reviewFails=0;P.prep=null;return cycle();}
     P.reviewFails++;
-    if(P.reviewFails>=3){setStatus("warn","다시 한국어 뜻으로 도전해 볼게요");await sleep(W("r3"));if(g!==P.gen)return;P.review=false;P.reviewFails=0;P.prep=null;return cycle();}
-    setStatus("bad","한 번 더 따라 해 볼게요");await sleep(W("r3"));if(g!==P.gen)return;return cycle();}
+    if(P.reviewFails>=3){setStatus("warn","다시 한국어 뜻으로 도전해 볼게요");await sleep(WR("r3"));if(g!==P.gen)return;P.review=false;P.reviewFails=0;P.prep=null;return cycle();}
+    setStatus("bad","한 번 더 따라 해 볼게요");await sleep(WR("r3"));if(g!==P.gen)return;return cycle();}
   if(!pass)P.fails++;
   const skip=!pass&&P.fails>=max;const last=P.round>=maxRound(s);
   addLog({kind:"try",lang:s.lang,sid:s.id,text,round:P.round,score:best.pct,result:pass?"통과":skip?"넘김":"실패"});
-  if(pass){setStatus("ok",`✅ 통과! (${P.round}회차)`);await sleep(W("pass"));if(g!==P.gen)return;
+  if(pass){setStatus("ok",`✅ 통과! (${P.round}회차)`);await sleep(WR("pass"));if(g!==P.gen)return;
     if(!last){P.round++;P.fails=0;P.peek=false;P.prep=null;savePos();return cycle();}
     P.sess.scores[s.id]=best.pct;if(!P.sess.done.includes(s.id))P.sess.done.push(s.id);P.sess.failed=P.sess.failed.filter(x=>x!==s.id);save();return afterSentence(g,true);}
   if(skip){P.sess.scores[s.id]=best.pct;if(!P.sess.failed.includes(s.id))P.sess.failed.push(s.id);save();
-    setStatus("bad",`${P.fails}번 실패 — 다음 문장으로 넘어가요`);await sleep(W("skip"));if(g!==P.gen)return;return afterSentence(g,false);}
+    setStatus("bad",`${P.fails}번 실패 — 다음 문장으로 넘어가요`);await sleep(WR("skip"));if(g!==P.gen)return;return afterSentence(g,false);}
   save();
-  if(P.round===3){setStatus("bad",`아쉬워요 (${P.fails}/${max}) — 정답을 들려드릴게요`);await sleep(W("r3"));if(g!==P.gen)return;P.review=true;P.reviewFails=0;P.prep=null;return cycle();}
-  setStatus("bad",`다시 해볼게요 (${P.fails}/${max})`);await sleep(W("fail"));if(g!==P.gen)return;return cycle();
+  if(P.round===3){setStatus("bad",`아쉬워요 (${P.fails}/${max}) — 정답을 들려드릴게요`);await sleep(WR("r3"));if(g!==P.gen)return;P.review=true;P.reviewFails=0;P.prep=null;return cycle();}
+  setStatus("bad",`다시 해볼게요 (${P.fails}/${max})`);await sleep(WR("fail"));if(g!==P.gen)return;return cycle();
 }
 // 문장 하나를 끝낸 뒤: 깜짝 테스트를 낼지 결정
 async function afterSentence(g,passed){const s=cur();const sc=P.sess;
@@ -830,7 +832,7 @@ function renderP(){
     ${readVisible?`<div class="read" lang="ja">${readHTML(s)}</div><div class="roma">${esc(romajiLine(s.reading))}</div>`:""}
     ${ja&&s.reading&&P.showRead&&P.round===2&&!P.peek&&!r?`<div class="muted small">2회차는 읽기가 숨겨져요 (👀 빈칸 보기로 확인)</div>`:""}
     ${!r3&&P.showKo&&s.ko?`<div class="ko">${esc(s.ko)}</div>`:""}
-    <div class="status ${P.status} ${P.status==="speak"||P.status==="listen"?"pulse":""}">${esc(P.msg)}</div>
+    <div class="status ${P.status} ${P.status==="speak"||P.status==="listen"||P.status==="prep"?"pulse":""}">${esc(P.msg)}</div>
     <div class="heard" id="heard">${P.interim?"🗣 "+esc(r?r.heard:P.interim):""}</div>
     ${r?`<div class="score" style="color:${pc}">${r.pct}점</div><div class="muted small" style="text-align:center">통과 기준 ${S.settings.threshold}점</div>`:""}
     <div class="ctrl">
