@@ -619,7 +619,7 @@ function listen(lang){return new Promise((resolve,reject)=>{
     sdk.SpeechRecognizer.enableTelemetry(false);
     recognizer=new sdk.SpeechRecognizer(config,audio);
     // 지금 문장의 단어를 Azure에 미리 알려줘서 비슷한 소리(supply/supplier 등)를 덜 헷갈리게
-    try{const cs=cur();if(cs&&cs.lang===lang&&sdk.PhraseListGrammar){const pl=sdk.PhraseListGrammar.fromRecognizer(recognizer);pl.addPhrase(plainText(cs.lang,cs.text));}}catch(e){}
+    try{const cs=cur();if(cs&&cs.lang===lang&&sdk.PhraseListGrammar){const pl=sdk.PhraseListGrammar.fromRecognizer(recognizer);const full=plainText(cs.lang,cs.text);pl.addPhrase(full);if(cs.lang==="en")[...new Set(full.split(/\s+/).map(w=>w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,"")).filter(w=>w.length>=4))].forEach(w=>pl.addPhrase(w));}}catch(e){}
     recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(stop,SPEECH_MAX_MS);armQuiet(SPEECH_START_SILENCE_MS);sfx("go");
       const r3=(P.round===3&&!P.review)||!!P.quiz;setStatus("speak",r3?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");};
     recognizer.recognizing=(_,event)=>{if(done)return;partial=event.result.text||"";showHeard();armQuiet(SPEECH_PAUSE_MS);};
