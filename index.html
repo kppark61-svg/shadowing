@@ -383,7 +383,7 @@ const SAMPLE_JA=[
 function seed(){return[...SAMPLE_EN.map((x,i)=>({id:"s-en-"+(i+1),lang:"en",cat:x[0],text:x[1],reading:"",ko:x[2],memo:""})),
   ...SAMPLE_JA.map((x,i)=>({id:"s-ja-"+(i+1),lang:"ja",cat:x[0],text:x[1],reading:x[2],ko:x[3],memo:""}))];}
 const KEY="dokidoki-v2";
-const DEF_SET={threshold:80,maxFail:3,accent:"en-US",voiceEn:"",voiceJa:"",voiceKo:"",speed:"normal",quiz:{on:true,mode:"random",every:3,pct:30},record:false,readBack:true,showKo:true,showRead:true,sheetUrl:""};
+const DEF_SET={threshold:80,maxFail:3,accent:"en-US",voiceEn:"",voiceJa:"",voiceKo:"",speed:"normal",quiz:{on:true,mode:"random",every:3,pct:30},record:false,readBack:true,sfx:true,showKo:true,showRead:true,sheetUrl:""};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -474,6 +474,19 @@ function syncLine(){
 }
 window.addEventListener("online",()=>scheduleSync(500));
 setInterval(()=>{if(!document.hidden&&!P.running)sync();},60000);
+
+// ===== 효과음 (통과/실패) — 파일 없이 작게 합성해서 재생 =====
+const SFX={ctx:null};
+function sfxCtx(){if(!SFX.ctx){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;SFX.ctx=new C();}
+  if(SFX.ctx.state==="suspended")SFX.ctx.resume().catch(()=>{});return SFX.ctx;}
+function sfxTone(c,f,t0,dur,type,vol){const o=c.createOscillator(),g=c.createGain();o.type=type;o.frequency.value=f;
+  g.gain.setValueAtTime(0.0001,t0);g.gain.linearRampToValueAtTime(vol,t0+0.015);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  o.connect(g);g.connect(c.destination);o.start(t0);o.stop(t0+dur+0.05);}
+function sfx(kind){if(!S.settings.sfx)return;try{const c=sfxCtx();if(!c)return;const t=c.currentTime+0.02;
+  if(kind==="pass"){sfxTone(c,1046.5,t,0.35,"sine",0.10);sfxTone(c,1318.5,t+0.11,0.5,"sine",0.10);} // 도-미: 맑은 딩동
+  else{sfxTone(c,392,t,0.28,"triangle",0.09);sfxTone(c,329.6,t+0.16,0.42,"triangle",0.09);}}catch(e){}} // 솔-미: 낮고 부드럽게
+// 아이폰은 화면을 누른 뒤에만 소리를 낼 수 있어서, 누를 때마다 준비해 둠
+document.addEventListener("pointerdown",()=>{if(S.settings.sfx)sfxCtx();},{passive:true});
 
 // ===== 음성 =====
 let REC=null;
@@ -743,7 +756,8 @@ async function cycle(skipTTS){
   let best=null;for(const a of alts){const r=scoreAny(s.lang,pr.units,s.reading,a);if(!best||r.pct>best.pct)best={...r,heard:a};}
   P.result=best;const pass=best.pct>=S.settings.threshold;const max=S.settings.maxFail;
   // 채점 후 정답 한 번 더 읽어 주기 (깜짝 테스트 실패는 아래에서 바로 정답을 읽어 줘서 건너뜀)
-  if(S.settings.readBack&&!(P.quiz&&!pass)){setStatus(pass?"ok":"bad",(pass?"⭕ ":"❌ ")+best.pct+"점 · 🔊 정답 다시 들어 보세요");await speak(text,s.lang);if(g!==P.gen)return;rb=true;}
+  sfx(pass?"pass":"fail");
+  if(S.settings.readBack&&!(P.quiz&&!pass)){await sleep(650);if(g!==P.gen)return;setStatus(pass?"ok":"bad",(pass?"⭕ ":"❌ ")+best.pct+"점 · 🔊 정답 다시 들어 보세요");await speak(text,s.lang);if(g!==P.gen)return;rb=true;}
   // ⚡ 깜짝 테스트: 기회 한 번
   if(P.quiz){P.sess.quiz.n++;if(pass)P.sess.quiz.ok++;
     addLog({kind:"try",lang:s.lang,sid:s.id,text,round:3,score:best.pct,result:pass?"깜짝성공":"깜짝실패"});
@@ -1139,6 +1153,7 @@ function renderSettings(){
       <div class="seg"><button class="${st.quiz.mode==="every"?"on":""}" onclick="setQ('mode','every')">문장 지정</button><button class="${st.quiz.mode==="random"?"on":""}" onclick="setQ('mode','random')">랜덤</button></div></div>
     <div class="set"><div class="t">${st.quiz.mode==="every"?"몇 문장마다":"확률"}</div><div class="row" style="flex-wrap:nowrap"><input type="number" inputmode="numeric" min="1" max="${st.quiz.mode==="every"?50:100}" value="${st.quiz.mode==="every"?st.quiz.every:st.quiz.pct}" style="width:80px;text-align:center" onchange="setQ('${st.quiz.mode==="every"?"every":"pct"}',Math.max(1,Math.min(${st.quiz.mode==="every"?50:100},Math.round(+this.value)||1)))"><span>${st.quiz.mode==="every"?"문장마다":"%"}</span></div></div>`:""}
     <div class="set"><div class="t">실패 허용<div class="d">한 회차에서 이만큼 틀리면 다음 문장으로 넘어가요 (3회차 정답 따라 하기는 안 셈)</div></div><select style="width:90px" onchange="setS('maxFail',+this.value)">${[1,2,3,4,5].map(n=>`<option value="${n}" ${n===st.maxFail?"selected":""}>${n}번</option>`).join("")}</select></div>
+    <div class="set"><div class="t">효과음<div class="d">통과·실패할 때 작은 소리를 내요</div></div><div class="row" style="flex-wrap:nowrap"><button class="btn sm" onclick="sfx('pass')">🔊 통과</button><button class="btn sm" onclick="sfx('fail')">🔊 실패</button><label class="sw"><input type="checkbox" ${st.sfx?"checked":""} onchange="setS('sfx',this.checked)"><span></span></label></div></div>
     <div class="set"><div class="t">채점 후 정답 읽어 주기<div class="d">말하고 나면 통과든 아니든 정답 문장을 한 번 더 들려줘요</div></div><label class="sw"><input type="checkbox" ${st.readBack?"checked":""} onchange="setS('readBack',this.checked)"><span></span></label></div>
     <div class="set"><div class="t">한국어 뜻 기본 표시</div><label class="sw"><input type="checkbox" ${st.showKo?"checked":""} onchange="P.showKo=null;setS('showKo',this.checked)"><span></span></label></div>
     <div class="set"><div class="t">일본어 읽기·로마자 기본 표시</div><label class="sw"><input type="checkbox" ${st.showRead?"checked":""} onchange="P.showRead=null;setS('showRead',this.checked)"><span></span></label></div>
