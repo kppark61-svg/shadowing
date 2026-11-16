@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v22";const APP_DATE="2026-11-16";
+const APP_VERSION="v23";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -233,8 +233,15 @@ function fixSpacingEn(target,heard){
     else out.push(h);}
   return out;
 }
+// 끝의 -d/-ed/-s/-es 차이는 맞은 걸로 (manage↔managed, phase↔phases): 이어 말하면 거의 안 들려서
+const ENDINGS=["d","ed","s","es"];
+function fixEndingsEn(target,heard){const T=new Set(target);
+  return heard.map(h=>{if(T.has(h))return h;
+    for(const t of T){if(t.length<3&&h.length<3)continue;
+      for(const e of ENDINGS){if(h===t+e||t===h+e)return t;}}
+    return h;});}
 function scoreEn(units,heard){const target=units.flatMap(u=>normWord(u.t));
-  const r=scoreUnits(units,normWord,fixSpacingEn(target,String(heard||"").split(/\s+/).flatMap(normWord)));return{pct:r.pct,line:"text",unitOk:r.ok};}
+  const r=scoreUnits(units,normWord,fixEndingsEn(target,fixSpacingEn(target,String(heard||"").split(/\s+/).flatMap(normWord))));return{pct:r.pct,line:"text",unitOk:r.ok};}
 
 // ---------- 일본어 ----------
 const kataToHira=s=>String(s).replace(/[ァ-ヶ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));
