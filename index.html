@@ -488,6 +488,8 @@ const SPEECH_URL="https://script.google.com/macros/s/AKfycbwD7F7t6hZntilV8UviiyC
 const SPEECH_SDK_URL="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.53.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
 const SPEECH_END_SILENCE_MS=2500; // 말이 끝났다고 보는 조용한 시간
 const SPEECH_START_SILENCE_MS=7000; // 말 시작을 기다리는 시간
+const SPEECH_PAUSE_MS=4000; // 말하는 중간에 쉬어도 기다려 주는 시간 (Azure 최대 5000)
+const SPEECH_MAX_MS=30000; // 한 번에 말할 수 있는 최대 시간
 const SPEECH_CODE_KEY="dokidoki-speech-code";
 const SPEECH={token:null,loading:null,code:"",message:""};
 try{SPEECH.code=localStorage.getItem(SPEECH_CODE_KEY)||sessionStorage.getItem(SPEECH_CODE_KEY)||"";}catch(e){}
@@ -577,10 +579,11 @@ function listen(lang){return new Promise((resolve,reject)=>{
     config.speechRecognitionLanguage=speechLang(lang);config.outputFormat=sdk.OutputFormat.Detailed;
     config.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,String(SPEECH_START_SILENCE_MS));
     config.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,String(SPEECH_END_SILENCE_MS));
+    config.setProperty(sdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,String(SPEECH_PAUSE_MS)); // 말하는 중간에 고민해도 안 끊기게
     audio=sdk.AudioConfig.fromStreamInput(mic); // 마이크 MediaStream을 그대로 넘김 (fromStream은 SDK에 없는 함수)
     sdk.SpeechRecognizer.enableTelemetry(false);
     recognizer=new sdk.SpeechRecognizer(config,audio);
-    recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(()=>{try{recognizer.stopContinuousRecognitionAsync();}catch(e){}finish(null,P.interim?[P.interim]:[]);},15000);
+    recognizer.sessionStarted=()=>{if(done)return;clearTimeout(prepareTimer);hard=setTimeout(()=>{try{recognizer.stopContinuousRecognitionAsync();}catch(e){}finish(null,P.interim?[P.interim]:[]);},SPEECH_MAX_MS);
       const r3=(P.round===3&&!P.review)||!!P.quiz;setStatus("speak",r3?"🎙 기억해서 외국어로 말해 보세요":"🎙 따라 말하세요");};
     recognizer.recognizing=(_,event)=>{if(done)return;P.interim=event.result.text||"";const el=$("#heard");if(el)el.textContent="🗣 "+P.interim;};
     const cancelError=event=>{
