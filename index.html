@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v19";const APP_DATE="2026-11-16";
+const APP_VERSION="v20";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -479,19 +479,27 @@ function syncLine(){
 window.addEventListener("online",()=>scheduleSync(500));
 setInterval(()=>{if(!document.hidden&&!P.running)sync();},60000);
 
-// ===== 효과음 (통과/실패) — 파일 없이 작게 합성해서 재생 =====
-const SFX={ctx:null};
-function sfxCtx(){if(!SFX.ctx){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;SFX.ctx=new C();}
-  if(SFX.ctx.state==="suspended")SFX.ctx.resume().catch(()=>{});return SFX.ctx;}
-function sfxTone(c,f,t0,dur,type,vol){const o=c.createOscillator(),g=c.createGain();o.type=type;o.frequency.value=f;
-  g.gain.setValueAtTime(0.0001,t0);g.gain.linearRampToValueAtTime(vol,t0+0.015);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
-  o.connect(g);g.connect(c.destination);o.start(t0);o.stop(t0+dur+0.05);}
-function sfx(kind){if(!S.settings.sfx)return;try{const c=sfxCtx();if(!c)return;const t=c.currentTime+0.02;
-  if(kind==="pass"){sfxTone(c,1046.5,t,0.35,"sine",0.32);sfxTone(c,1318.5,t+0.11,0.5,"sine",0.32);} // 도-미: 맑은 딩동
-  else if(kind==="go"){sfxTone(c,1567.98,t,0.18,"sine",0.26);} // 솔(높게): 이제 말하세요 "띵"
-  else{sfxTone(c,392,t,0.28,"triangle",0.30);sfxTone(c,329.6,t+0.16,0.42,"triangle",0.30);}}catch(e){}} // 솔-미: 낮고 부드럽게
-// 아이폰은 화면을 누른 뒤에만 소리를 낼 수 있어서, 누를 때마다 준비해 둠
-document.addEventListener("pointerdown",()=>{if(S.settings.sfx)sfxCtx();},{passive:true});
+// ===== 효과음 (시작/통과/실패) — WAV를 직접 만들어 <audio>로 재생 (Web Audio보다 아이폰에서 훨씬 크게 들림) =====
+const SFX_NOTES={
+  go:[[1567.98,0,0.20]],                       // 높은 "띵": 이제 말하세요
+  pass:[[1046.5,0,0.38],[1318.5,0.12,0.55]],   // 도-미 "딩동"
+  fail:[[392,0,0.30],[329.6,0.17,0.45]]};      // 솔-미 낮게
+const SFX={el:{},unlocked:false};
+function sfxWav(notes){const sr=22050,len=Math.ceil(sr*(Math.max(...notes.map(n=>n[1]+n[2]))+0.08)),buf=new Float32Array(len);
+  for(const [f,t0,dur] of notes){const a=Math.floor(t0*sr),n=Math.floor((dur+0.05)*sr);
+    for(let i=0;i<n&&a+i<len;i++){const t=i/sr,env=t<0.01?t/0.01:Math.exp(-5*(t-0.01)/dur);
+      buf[a+i]+=env*(Math.sin(2*Math.PI*f*t)+0.25*Math.sin(4*Math.PI*f*t));}}
+  let pk=0;for(const v of buf)pk=Math.max(pk,Math.abs(v));const k=pk?0.95/pk:1;
+  const dv=new DataView(new ArrayBuffer(44+len*2)),w=(o,str)=>{for(let i=0;i<str.length;i++)dv.setUint8(o+i,str.charCodeAt(i));};
+  w(0,"RIFF");dv.setUint32(4,36+len*2,true);w(8,"WAVEfmt ");dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);
+  dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);w(36,"data");dv.setUint32(40,len*2,true);
+  for(let i=0;i<len;i++)dv.setInt16(44+i*2,Math.max(-1,Math.min(1,buf[i]*k))*32767,true);
+  return URL.createObjectURL(new Blob([dv],{type:"audio/wav"}));}
+function sfxEl(kind){if(!SFX.el[kind]){const a=new Audio(sfxWav(SFX_NOTES[kind]));a.preload="auto";a.setAttribute("playsinline","");SFX.el[kind]=a;}return SFX.el[kind];}
+function sfx(kind){if(!S.settings.sfx||!SFX_NOTES[kind])return;try{const a=sfxEl(kind);a.muted=false;a.volume=1;a.currentTime=0;const p=a.play();if(p)p.catch(()=>{});}catch(e){}}
+// 아이폰은 화면을 누른 순간에 한 번 재생해 둔 소리만 나중에 자동으로 낼 수 있어서, 첫 터치 때 소리 없이 한 번씩 틀어 둠
+document.addEventListener("pointerdown",()=>{if(SFX.unlocked||!S.settings.sfx)return;SFX.unlocked=true;
+  for(const k in SFX_NOTES){try{const a=sfxEl(k);a.muted=true;const p=a.play();if(p)p.then(()=>{a.pause();a.currentTime=0;a.muted=false;}).catch(()=>{a.muted=false;});}catch(e){}}},{passive:true});
 
 // ===== 음성 =====
 let REC=null;
