@@ -70,6 +70,9 @@ h2{font-family:var(--fun);font-weight:400;font-size:18px;margin:4px 0 12px}
 .ptop{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .star{font-size:26px;background:none;border:0;cursor:pointer;color:#e8d8da;padding:0 4px}
 .star.on{color:#ffb020}
+.photo{margin:14px 0 6px;border-radius:16px;overflow:hidden;background:#f7eded;text-align:center}
+.photo img{display:block;width:100%;max-height:46vh;object-fit:contain;background:#f7eded}
+.photo a{display:block;padding:24px;color:var(--sub)}
 .sent{font-size:26px;line-height:1.55;font-weight:700;margin:14px 0 4px;word-break:break-word}
 .sent.ja{font-size:26px;letter-spacing:.5px;line-break:strict}
 .sent .w{display:inline-block;padding:0 2px;border-radius:6px}
@@ -161,7 +164,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v26";const APP_DATE="2026-11-16";
+const APP_VERSION="v27";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -738,7 +741,15 @@ const WAITS={slow:{pass:2600,fail:1800,r3:1500,skip:1800,quiet:1200},normal:{pas
 const W=k=>(WAITS[S.settings.speed]||WAITS.normal)[k];
 const READBACK_WAIT_MS=4000; // 정답을 다시 읽어 준 뒤 다음으로 넘어가기 전 기다리는 시간
 const ROUND_NAME=["","전체 문장","빈칸","뜻 보고 말하기"];
-function modeLabel(m){if(!m)return"";
+// ===== 사진 보고 말하기 =====
+// 메모 칸에 "🖼 주소"를 넣으면 그 문장에 사진이 붙어요 (img/… 같은 저장소 경로, 구글 드라이브 공유 링크, https 주소)
+function imgOf(s){const m=String(s&&s.memo||"").match(/🖼\uFE0F?\s*(\S+)/);if(!m)return"";const u=m[1];
+  const d=u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=)([\w-]+)/);
+  return d?"https://drive.google.com/thumbnail?id="+d[1]+"&sz=w1000":u;}
+function memoText(s){return String(s&&s.memo||"").replace(/🖼\uFE0F?\s*\S+/,"").trim();}
+const isPhoto=()=>!!(P.mode&&P.mode.kind==="photo");
+function prefetchImg(){if(!isPhoto())return;const nx=byId(P.queue[P.i+1]);const u=imgOf(nx);if(u){const im=new Image();im.src=u;}}
+function modeLabel(m){if(!m)return"";if(m.kind==="photo")return(m.lang?FLAG[m.lang]+" ":"")+"🖼 사진 보고 말하기";
   if(m.kind==="deck"){const d=deckById(m.deckId);return"🃏 "+(d?d.name:"덱");}
   if(m.kind==="ids")return m.label||"골라 뽑은 문장";
   return(m.lang?FLAG[m.lang]+" ":"")+({all:"전체 문장",failed:"틀린 문장",star:"별표 문장",cat:m.cat}[m.kind]||"");}
@@ -749,6 +760,7 @@ function buildQueue(m){
   if(m.kind==="failed")L=L.filter(s=>myPeek(s.id).status==="failed");
   else if(m.kind==="star")L=L.filter(s=>myPeek(s.id).star);
   else if(m.kind==="cat")L=L.filter(s=>s.cat===m.cat);
+  else if(m.kind==="photo")L=L.filter(s=>imgOf(s));
   return L.map(s=>s.id);}
 function shuffle(a){a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 // 약한 문장 우선 가중치: 틀림 +3, 점수 낮음 +2, 처음 +1, 오래 안 함 최대 +3, 완료는 덜 뽑힘
@@ -777,11 +789,11 @@ function quizRule(){const q=S.settings.quiz;return q.mode==="every"?`${q.every}�
 function chooseGo(order){const mode=CHO;let ids=buildQueue(mode);
   if(order==="shuffle")ids=shuffle(ids);
   else if(order==="random"){const n=Math.round(+$("#choN").value);if(!(n>=1)){toast("개수를 숫자로 넣어 주세요");return;}ids=pickWeighted(ids,Math.min(n,ids.length));}
-  const qz=$("#choQuiz").checked;closeModal();startPractice(mode,{order,queue:ids,quizOn:qz});}
+  const qz=mode.kind==="photo"?false:$("#choQuiz").checked;closeModal();startPractice(mode,{order,queue:ids,quizOn:qz});}
 
 function getPrep(){const s=cur();if(!s)return null;const r=P.quiz?3:P.review?1:P.round;const k=s.id+"|"+r+"|"+s.text;
   if(!P.prep||P.prep.k!==k)P.prep={k,...prepare(s.lang,s.text,r)};return P.prep;}
-function resetSentence(){P.quiz=null;P.round=1;P.fails=0;P.result=null;P.peek=false;P.hint=false;P.review=false;P.reviewFails=0;P.interim="";P.noSpeech=0;P.prep=null;if(P.recUrl){URL.revokeObjectURL(P.recUrl);P.recUrl=null;}}
+function resetSentence(){P.quiz=null;P.round=isPhoto()?3:1;P.fails=0;P.result=null;P.peek=false;P.hint=false;P.review=false;P.reviewFails=0;P.interim="";P.noSpeech=0;P.prep=null;P.koHint=false;if(P.recUrl){URL.revokeObjectURL(P.recUrl);P.recUrl=null;}}
 function savePos(){const s=byId(P.queue[P.i]);S.pos=s&&!P.showResult?{mode:P.mode,order:P.order,queue:P.queue,id:s.id,round:P.round,sess:P.sess}:null;save();}
 function startPractice(mode,o){o=o||{};const q=o.queue||buildQueue(mode);if(!q.length){toast("연습할 문장이 없어요");return;}
   stopP(undefined,true);P.from=view;
@@ -823,7 +835,8 @@ async function cycle(skipTTS){
   const pr=getPrep();const text=plainText(s.lang,s.text);
   const r3=(P.round===3&&!P.review)||!!P.quiz;let rb=false;const WR=k=>rb?READBACK_WAIT_MS:W(k);
   if(!skipTTS){
-    if(r3){setStatus("listen","🔊 한국어 뜻을 들려드릴게요");await speak(s.ko,"ko");}
+    if(r3&&isPhoto()&&imgOf(s)){setStatus("listen","🖼 사진을 보고 떠올려 보세요");await sleep(1500);}
+    else if(r3){setStatus("listen","🔊 한국어 뜻을 들려드릴게요");await speak(s.ko,"ko");}
     else{setStatus("listen",P.review?"🔊 정답을 잘 들어 보세요":"🔊 듣는 중…");await speak(text,s.lang);}
     if(g!==P.gen)return;await sleep(200);if(g!==P.gen)return;}
   setStatus("prep","☁️ 음성인식 준비 중…");
@@ -923,7 +936,7 @@ function renderP(){
   if(!P.queue.length){el.innerHTML=practiceStartHTML();return;}
   if(P.showResult){el.innerHTML=back+resultHTML();return;}
   const s=cur();if(!s){el.innerHTML=back+`<div class="card empty">문장이 삭제됐어요.</div>`;return;}
-  const pr=getPrep();const max=S.settings.maxFail;const r=P.result;const m=myPeek(s.id);const mr=maxRound(s);
+  const pr=getPrep();const max=S.settings.maxFail;const r=P.result;const m=myPeek(s.id);const mr=maxRound(s);prefetchImg();
   const pc=r?(r.pct>=S.settings.threshold?"var(--ok)":"var(--bad)"):"var(--sub)";
   const ja=s.lang==="ja",r3=(P.round===3&&!P.review)||!!P.quiz;
   const readVisible=ja&&s.reading&&P.showRead&&(P.round===1||P.review||P.peek||r);
@@ -931,10 +944,12 @@ function renderP(){
   <div class="card">
     <div class="ptop"><div><div class="muted small">${esc(modeLabel(P.mode))} · ${ORDER_NAME[P.order]||""}${P.mode.kind!=="cat"?" · "+esc(s.cat):""}</div><b class="fun" style="font-size:18px;font-weight:400">${FLAG[s.lang]} ${P.quiz?"⚡ 깜짝":`${P.i+1} / ${P.queue.length}`}</b></div>
       <button class="star ${m.star?"on":""}" onclick="pStar()" aria-label="별표">★</button></div>
-    ${P.quiz?`<div class="row"><span class="chip r" style="background:#f59e0b">⚡ 깜짝 테스트 · 기회 한 번</span></div>`:`<div class="row">${[1,2,3].filter(n=>n<=mr).map(n=>`<span class="chip ${P.round===n?"r":""}" onclick="pRound(${n})">${n}회차 · ${ROUND_NAME[n]}</span>`).join("")}
+    ${P.quiz?`<div class="row"><span class="chip r" style="background:#f59e0b">⚡ 깜짝 테스트 · 기회 한 번</span></div>`:isPhoto()?`<div class="row"><span class="chip r" style="background:#7356c4">🖼 사진 보고 말하기</span><span class="dots">${"♥".repeat(P.fails)}${"♡".repeat(Math.max(0,max-P.fails))}</span></div>`:`<div class="row">${[1,2,3].filter(n=>n<=mr).map(n=>`<span class="chip ${P.round===n?"r":""}" onclick="pRound(${n})">${n}회차 · ${ROUND_NAME[n]}</span>`).join("")}
       <span class="dots">${"♥".repeat(P.fails)}${"♡".repeat(Math.max(0,max-P.fails))}</span></div>`}
     ${P.review?`<div style="margin-top:10px"><span class="chip done">📖 정답 따라 하기 (복습)</span></div>`:""}
-    ${r3?`<div class="fun" style="font-size:21px;margin-top:14px">🇰🇷 ${esc(s.ko)}</div><div class="muted small">이 뜻을 ${s.lang==="ja"?"일본어":"영어"}로 말해 보세요</div>`:""}
+    ${r3&&isPhoto()&&imgOf(s)?`<div class="photo"><img src="${esc(imgOf(s))}" alt="" onerror="this.parentNode.innerHTML='<a href=&quot;'+this.src+'&quot; target=&quot;_blank&quot;>🖼 사진을 불러오지 못했어요 (눌러서 열기)</a>'"></div>
+      <div class="muted small">사진을 보고 ${s.lang==="ja"?"일본어":"영어"}로 말해 보세요${P.koHint&&s.ko?` · 🇰🇷 ${esc(s.ko)}`:""}</div>`
+    :r3?`<div class="fun" style="font-size:21px;margin-top:14px">🇰🇷 ${esc(s.ko)}</div><div class="muted small">이 뜻을 ${s.lang==="ja"?"일본어":"영어"}로 말해 보세요</div>`:""}
     <div class="sent ${ja?"ja":""} ${isLive()?"live":""}" id="sent" lang="${s.lang}">${sentHTML(s,pr)}</div>
     ${readVisible?`<div class="read" lang="ja">${readHTML(s)}</div><div class="roma">${esc(romajiLine(s.reading))}</div>`:""}
     ${ja&&s.reading&&P.showRead&&P.round===2&&!P.peek&&!r?`<div class="muted small">2회차는 읽기가 숨겨져요 (👀 빈칸 보기로 확인)</div>`:""}
@@ -951,13 +966,13 @@ function renderP(){
     </div>
     <div class="row" style="margin-top:10px;justify-content:center">
       ${P.round===2&&!P.review?`<button class="btn sm" onclick="pPeek()">${P.peek?"🙈 빈칸 숨기기":"👀 빈칸 보기"}</button>`:""}
-      ${r3?`<button class="btn sm" onclick="pHint()">${P.hint?"💡 힌트 숨기기":"💡 힌트 (첫 글자)"}</button><button class="btn sm" onclick="pAnswer()">🔊 정답 듣기</button>`:""}
+      ${r3&&isPhoto()&&s.ko?`<button class="btn sm" onclick="P.koHint=!P.koHint;renderP()">${P.koHint?"🇰🇷 뜻 숨기기":"🇰🇷 뜻 보기"}</button>`:""}${r3?`<button class="btn sm" onclick="pHint()">${P.hint?"💡 힌트 숨기기":"💡 힌트 (첫 글자)"}</button><button class="btn sm" onclick="pAnswer()">🔊 정답 듣기</button>`:""}
       ${ja&&s.reading&&!r3?`<button class="btn sm" onclick="pRead()">${P.showRead?"읽기 숨기기":"읽기 보기"}</button>`:""}
       ${!r3?`<button class="btn sm" onclick="pKo()">${P.showKo?"뜻 숨기기":"뜻 보기"}</button>`:""}
       ${P.recUrl?`<button class="btn sm soft" onclick="pPlayRec()">▶ 내 발음 듣기</button>`:""}
     </div>
   </div>
-  ${s.memo?`<div class="card muted small">📌 ${esc(s.memo)}</div>`:""}
+  ${memoText(s)?`<div class="card muted small">📌 ${esc(memoText(s))}</div>`:""}
   ${!navigator.mediaDevices?`<div class="card status warn">마이크를 사용할 수 있는 https 주소에서 열어 주세요.</div>`:!SPEECH.code?`<div class="card status warn">설정 → Azure 음성인식에서 연결 암호를 먼저 입력해 주세요.</div>`:""}`;
 }
 
@@ -1007,6 +1022,7 @@ function practiceStartHTML(){
     <button class="btn pri" style="grid-column:1/-1;padding:14px" onclick="choose({kind:'all',lang:S.lang})">▶ 전체 연습</button>
     <button class="btn" onclick="choose({kind:'failed',lang:S.lang})" ${failed?"":"disabled"}>💔 틀린 문장 (${failed})</button>
     <button class="btn" onclick="choose({kind:'star',lang:S.lang})" ${star?"":"disabled"}>⭐ 별표 문장 (${star})</button>
+    ${(()=>{const n=L.filter(s=>imgOf(s)).length;return n?`<button class="btn" style="grid-column:1/-1;background:#efe9fb;color:#7356c4" onclick="choose({kind:'photo',lang:S.lang})">🖼 사진 보고 말하기 (${n})</button>`:"";})()}
   </div>
   <h2>🃏 내 덱</h2>
   ${ds.map(d=>`<div class="card cat"><div style="flex:1" onclick="choose({kind:'deck',deckId:'${d.id}'})"><div class="row"><span class="nm">${esc(d.name)}</span><span class="muted small">${d.sids.filter(byId).length}문장</span></div></div><button class="btn sm" onclick="deckModal('${d.id}')">편집</button></div>`).join("")}
