@@ -164,7 +164,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v30";const APP_DATE="2026-11-16";
+const APP_VERSION="v31";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -428,7 +428,7 @@ const KEY="dokidoki-v2";
 // 기본 연결값: 처음 켜거나 저장값이 지워져도 따로 입력 없이 바로 작동
 const DEFAULT_SHEET_URL="https://script.google.com/macros/s/AKfycbwD7F7t6hZntilV8UviiyCATtuPH5SfFGFZxvQKXhvvDxy04R9wAToH2_aVywiStt0/exec";
 const DEFAULT_SPEECH_CODE="1111111111111111";
-const DEF_SET={threshold:80,maxFail:3,accent:"en-US",voiceEn:"",voiceJa:"",voiceKo:"",speed:"normal",quiz:{on:true,mode:"random",every:3,pct:30},record:false,readBack:true,sfx:true,showKo:true,showRead:true,sheetUrl:DEFAULT_SHEET_URL};
+const DEF_SET={threshold:80,maxFail:3,accent:"en-US",voiceEn:"",voiceJa:"",voiceKo:"",speed:"normal",quiz:{on:true,mode:"random",every:3,pct:30},record:false,readBack:true,sfx:true,rounds:"all",showKo:true,showRead:true,sheetUrl:DEFAULT_SHEET_URL};
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -785,6 +785,7 @@ function pickWeighted(ids,n){const pool=ids.map(id=>({id,w:weightOf(id)}));const
 
 // 연습 방식 고르기 창
 let CHO=null;
+function chooseRounds(v){S.settings.rounds=v;save();choose(CHO);}
 function choose(mode){const ids=buildQueue(mode);if(!ids.length){toast("연습할 문장이 없어요");return;}CHO=mode;
   openModal(`<h2>${esc(modeLabel(mode))} <span class="muted small">${ids.length}문장</span></h2><p class="muted small" style="margin-top:-6px">어떻게 연습할까요?</p>
   <div style="display:grid;gap:10px;margin-top:8px">
@@ -793,6 +794,7 @@ function choose(mode){const ids=buildQueue(mode);if(!ids.length){toast("연습�
     <div class="row" style="flex-wrap:nowrap;border:1.5px solid var(--line);border-radius:14px;padding:8px 8px 8px 14px">
       <span class="fun" style="flex:1">🎲 랜덤</span><input type="number" id="choN" min="1" max="${ids.length}" value="${Math.min(10,ids.length)}" inputmode="numeric" style="width:76px;text-align:center"><span>개</span><button class="btn pri" onclick="chooseGo('random')">시작</button></div>
     <div class="muted small">🎲 랜덤은 틀렸던 문장·점수 낮은 문장·오래 안 한 문장이 더 잘 뽑혀요</div>
+    ${mode.kind!=="photo"?`<div class="row" style="flex-wrap:nowrap;border-top:1px solid var(--line);padding-top:12px;margin-top:2px"><span class="fun" style="flex:1">연습 방식</span><div class="seg"><button class="${!meaningOnly()?"on":""}" onclick="chooseRounds('all')">1→2→3회차</button><button class="${meaningOnly()?"on":""}" onclick="chooseRounds('r3')">뜻만</button></div></div>`:""}
     <label class="row" style="flex-wrap:nowrap;border-top:1px solid var(--line);padding-top:12px;margin-top:2px"><span class="fun" style="flex:1">⚡ 깜짝 테스트 <span class="muted small">${quizRule()}</span></span><span class="sw"><input type="checkbox" id="choQuiz" ${S.settings.quiz.on?"checked":""}><span></span></span></label>
   </div>`);}
 function quizRule(){const q=S.settings.quiz;return q.mode==="every"?`${q.every}문장마다`:`문장마다 ${q.pct}% 확률`;}
@@ -803,7 +805,9 @@ function chooseGo(order){const mode=CHO;let ids=buildQueue(mode);
 
 function getPrep(){const s=cur();if(!s)return null;const r=P.quiz?3:P.review?1:P.round;const k=s.id+"|"+r+"|"+s.text;
   if(!P.prep||P.prep.k!==k)P.prep={k,...prepare(s.lang,s.text,r)};return P.prep;}
-function resetSentence(){P.quiz=null;P.round=isPhoto()?3:1;P.fails=0;P.result=null;P.peek=false;P.hint=false;P.review=false;P.reviewFails=0;P.interim="";P.noSpeech=0;P.prep=null;P.koHint=false;if(P.recUrl){URL.revokeObjectURL(P.recUrl);P.recUrl=null;}}
+// 연습 방식: "all"=1→2→3회차, "r3"=뜻 보고 말하기만 (뜻이 없는 문장은 1회차부터)
+const meaningOnly=()=>S.settings.rounds==="r3";
+function resetSentence(){P.quiz=null;const s0=byId(P.queue[P.i]);P.round=isPhoto()||(meaningOnly()&&s0&&s0.ko)?3:1;P.fails=0;P.result=null;P.peek=false;P.hint=false;P.review=false;P.reviewFails=0;P.interim="";P.noSpeech=0;P.prep=null;P.koHint=false;if(P.recUrl){URL.revokeObjectURL(P.recUrl);P.recUrl=null;}}
 function savePos(){const s=byId(P.queue[P.i]);S.pos=s&&!P.showResult?{mode:P.mode,order:P.order,queue:P.queue,id:s.id,round:P.round,sess:P.sess}:null;save();}
 function startPractice(mode,o){o=o||{};const q=o.queue||buildQueue(mode);if(!q.length){toast("연습할 문장이 없어요");return;}
   stopP(undefined,true);P.from=view;
@@ -1282,6 +1286,7 @@ function renderSettings(){
     <div class="row" style="margin-top:10px"><button class="btn sm" onclick="testSpeechConnection()" ${SPEECH.testing?"disabled":""}>연결 테스트</button></div>
     ${SPEECH.message?`<p class="muted small" role="status">${esc(SPEECH.message)}</p>`:""}</div>
   <div class="card"><h2>연습</h2>
+    <div class="set"><div class="t">연습 방식<div class="d">"뜻만"을 고르면 1·2회차 없이 바로 한국어 뜻을 보고 말해요. 뜻이 없는 문장은 1회차부터 해요.</div></div><div class="seg"><button class="${st.rounds!=="r3"?"on":""}" onclick="setS('rounds','all')">1→2→3회차</button><button class="${st.rounds==="r3"?"on":""}" onclick="setS('rounds','r3')">뜻만</button></div></div>
     <div class="set" style="display:block"><div class="row" style="justify-content:space-between"><div class="t">통과 기준</div><b class="fun" style="font-weight:400">${st.threshold}점</b></div>
       <input type="range" min="50" max="100" step="5" value="${st.threshold}" oninput="this.previousElementSibling.lastElementChild.textContent=this.value+'점'" onchange="setS('threshold',+this.value)">
       <div class="d">1·2·3회차 모두 이 점수 이상이면 통과예요 (영어는 단어, 일본어는 글자 단위 비교)</div></div>
