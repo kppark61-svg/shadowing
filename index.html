@@ -164,7 +164,7 @@ input[type=range]{width:100%;accent-color:var(--pri)}
 <div id="splash" role="img" aria-label="규태와 지영이의 두근두근 외국어공부 — 여행도, 일상도, 자신 있게 외국어로!"><div class="bg"></div><img src="splash.webp" alt="" decoding="async"><div class="ver" id="splashVer"></div></div>
 <script>
 // 앱 버전 — 고칠 때마다 sw.js의 VERSION과 같이 올려 주세요
-const APP_VERSION="v29";const APP_DATE="2026-11-16";
+const APP_VERSION="v30";const APP_DATE="2026-11-16";
 // 실행 화면: 4초 보여 주고 사라짐. 화면을 누르면 바로 넘어가요.
 (function(){const el=document.getElementById("splash");let gone=false;
   document.getElementById("splashVer").textContent=APP_VERSION+" · "+APP_DATE;
@@ -571,12 +571,22 @@ const speechLang=lang=>lang==="ja"?"ja-JP":lang==="ko"?"ko-KR":S.settings.accent
 function voicesFor(lang){if(!window.speechSynthesis)return[];const pre=lang==="ja"?"ja":lang==="ko"?"ko":S.settings.accent.slice(0,5).toLowerCase();return speechSynthesis.getVoices().filter(v=>v.lang.replace("_","-").toLowerCase().startsWith(pre));}
 function pickVoice(lang){const vs=voicesFor(lang);const want=lang==="ja"?S.settings.voiceJa:lang==="ko"?S.settings.voiceKo:S.settings.voiceEn;return vs.find(v=>v.name===want)||vs[0]||null;}
 if(window.speechSynthesis)speechSynthesis.onvoiceschanged=()=>{if(view==="settings")renderSettings();};
-function speak(text,lang){return new Promise(res=>{
-  const ss=window.speechSynthesis;if(!ss)return res();ss.cancel();
-  const u=new SpeechSynthesisUtterance(text);u.lang=speechLang(lang);const v=pickVoice(lang);if(v)u.voice=v;u.rate=1;
-  let fin=false;const f=()=>{if(!fin){fin=true;clearTimeout(t);res();}};u.onend=f;u.onerror=f;
-  const t=setTimeout(f,3000+(lang==="en"?text.split(" ").length*600:[...text].length*250));
-  ss.speak(u);});}
+// 아이폰에서 가끔 목소리가 안 나오는 문제 대비:
+// ① 마이크를 막 끈 직후엔 잠깐 기다림(오디오 전환 시간) ② 이전 소리를 끊고 잠깐 쉼 ③ 0.15초 안에 시작 안 하면 한 번 더 시도
+let MIC_OFF_AT=0;
+function speak(text,lang){return new Promise(async res=>{
+  const ss=window.speechSynthesis;if(!ss)return res();
+  const wait=350-(Date.now()-MIC_OFF_AT);if(wait>0)await sleep(wait);
+  if(ss.speaking||ss.pending){ss.cancel();await sleep(120);}
+  try{ss.resume();}catch(e){}
+  let fin=false,t=null;const f=()=>{if(!fin){fin=true;clearTimeout(t);res();}};
+  const attempt=n=>{if(fin)return;
+    const u=new SpeechSynthesisUtterance(text);u.lang=speechLang(lang);const v=pickVoice(lang);if(v)u.voice=v;u.rate=1;
+    let started=false;u.onstart=()=>{started=true;};u.onend=()=>{if(started||n>=2)f();};u.onerror=()=>{if(started||n>=2)f();};
+    clearTimeout(t);t=setTimeout(f,3000+(lang==="en"?text.split(" ").length*600:[...text].length*250));
+    ss.speak(u);
+    setTimeout(()=>{if(fin||started)return;if(n<2){try{ss.cancel();}catch(e){}setTimeout(()=>attempt(n+1),200);}},1500);};
+  attempt(1);});}
 let mr=null;
 async function startRecording(mic){try{
   if(!window.MediaRecorder)return;
@@ -679,7 +689,7 @@ function listen(lang){return new Promise((resolve,reject)=>{
     stopRecording();
     try{if(recognizer)recognizer.close();}catch(e){}
     try{if(audio)audio.close();}catch(e){}
-    if(mic)mic.getTracks().forEach(t=>t.stop());
+    if(mic){mic.getTracks().forEach(t=>t.stop());MIC_OFF_AT=Date.now();}
     if(error)reject(azureError(error));else resolve({alts});
   };
   const stop=()=>{if(done||stopping)return;stopping=true;clearTimeout(quiet);clearTimeout(hard);
@@ -896,6 +906,33 @@ function pReplay(){const s=cur();if(!s)return;stopP();const r3=(P.round===3&&!P.
 function pAnswer(){const s=cur();if(!s)return;stopP();setStatus("listen","🔊 정답 듣는 중…");const g=P.gen;speak(plainText(s.lang,s.text),s.lang).then(()=>{if(g===P.gen)setStatus("idle","🎙 말하기로 바로 말해 보세요");});}
 function pMic(){stopP();cycle(true);}
 function pRound(r){P.quiz=null;const s=cur();if(r>maxRound(s))return;stopP();P.round=r;P.fails=0;P.result=null;P.peek=false;P.hint=false;P.review=false;P.prep=null;savePos();setStatus("idle",`${r}회차로 바꿨어요. ▶ 를 누르면 시작해요`);}
+// 연습 중에 지금 문장 삭제 (시트에서도 지워져서 상대방 앱에서도 사라져요)
+function pDelete(){const s=cur();if(!s)return;
+  if(!confirm(`이 문장을 삭제할까요?\n\n${plainText(s.lang,s.text)}\n\n(시트에서도 지워져서 상대방 앱에서도 사라져요)`))return;
+  stopP();S.sentences=S.sentences.filter(x=>x.id!==s.id);queueSentenceOp({op:"delete",id:s.id});
+  if(P.quiz){P.quiz=null;}else{P.queue=P.queue.filter(id=>id!==s.id);if(P.i>=P.queue.length)P.i=P.queue.length-1;}
+  if(!P.queue.length){toast("삭제했어요. 남은 문장이 없어요");goBack();return;}
+  resetSentence();savePos();setStatus("idle","🗑 삭제했어요. ▶ 로 다음 문장을 이어서 해요");}
+// 🕘 최근 학습한 문장: 기간을 고르고, 체크박스로 골라서 바로 연습하거나 덱으로 저장
+let RECENT={days:1,sel:null};
+function recentIds(days){const cut=addDays(localDate(),-(days-1));const seen=new Map();
+  S.logs.filter(l=>l.user===S.me&&l.kind==="try"&&l.lang===S.lang&&String(l.date)>=cut&&byId(l.sid))
+    .forEach(l=>{const p=seen.get(l.sid);if(!p||String(l.ts)>p)seen.set(l.sid,String(l.ts));});
+  return[...seen.entries()].sort((a,b)=>b[1].localeCompare(a[1])).map(x=>x[0]);}
+function recentModal(days){if(!S.me){chooseUser(true);return;}if(days)RECENT.days=days;
+  const ids=recentIds(RECENT.days);if(!RECENT.sel||days)RECENT.sel=new Set(ids);
+  const seg=[[1,"오늘"],[3,"3일"],[7,"7일"]].map(([d,l])=>`<button class="${RECENT.days===d?"on":""}" onclick="recentModal(${d})">${l}</button>`).join("");
+  openModal(`<h2>🕘 최근 학습한 문장 <span class="muted small">${ids.length}문장</span></h2>
+    <div class="seg" style="margin-bottom:8px">${seg}</div>
+    ${ids.length?`<div class="row" style="margin-bottom:6px"><button class="btn sm" onclick="recentAll(true)">전체 선택</button><button class="btn sm" onclick="recentAll(false)">전체 해제</button><span class="muted small" style="margin-left:auto">${RECENT.sel.size}개 선택</span></div>
+    <div style="max-height:46vh;overflow:auto">${ids.map(id=>{const s=byId(id);return`<label class="row" style="flex-wrap:nowrap;padding:8px 0;border-bottom:1px solid var(--line);align-items:flex-start"><input type="checkbox" ${RECENT.sel.has(id)?"checked":""} onchange="recentToggle('${id}',this.checked)" style="margin-top:4px"><span style="flex:1"><span lang="${s.lang}">${esc(plainText(s.lang,s.text))}</span><br><span class="muted small">${esc(s.ko)}</span></span></label>`;}).join("")}</div>
+    <div class="row" style="margin-top:14px"><button class="btn" style="flex:1" onclick="recentToDeck()">🃏 덱으로 저장</button><button class="btn pri" style="flex:1" onclick="recentGo()">▶ 선택한 문장 연습</button></div>`
+    :`<div class="empty">이 기간에 연습한 ${LANG_NAME[S.lang]} 문장이 없어요.</div><div class="row" style="margin-top:14px"><button class="btn" style="flex:1" onclick="closeModal()">닫기</button></div>`}`);}
+function recentToggle(id,on){if(on)RECENT.sel.add(id);else RECENT.sel.delete(id);const c=document.querySelector(".modal .muted.small[style*='margin-left']");if(c)c.textContent=RECENT.sel.size+"개 선택";}
+function recentAll(on){RECENT.sel=new Set(on?recentIds(RECENT.days):[]);recentModal();}
+function recentPicked(){return recentIds(RECENT.days).filter(id=>RECENT.sel.has(id));}
+function recentGo(){const ids=recentPicked();if(!ids.length){toast("문장을 골라 주세요");return;}closeModal();startPractice({kind:"ids",ids,label:"🕘 최근 학습"},{queue:ids,quizOn:false});}
+function recentToDeck(){const ids=recentPicked();if(!ids.length){toast("문장을 골라 주세요");return;}SEL=new Set(ids);addToDeckModal();}
 function pStar(){const s=cur();if(!s)return;addLog({kind:"star",lang:s.lang,sid:s.id,text:plainText(s.lang,s.text),result:myPeek(s.id).star?"끔":"켬"});renderP();}
 function pPeek(){P.peek=!P.peek;renderP();}
 function pHint(){P.hint=!P.hint;renderP();}
@@ -970,6 +1007,7 @@ function renderP(){
       ${ja&&s.reading&&!r3?`<button class="btn sm" onclick="pRead()">${P.showRead?"읽기 숨기기":"읽기 보기"}</button>`:""}
       ${!r3?`<button class="btn sm" onclick="pKo()">${P.showKo?"뜻 숨기기":"뜻 보기"}</button>`:""}
       ${P.recUrl?`<button class="btn sm soft" onclick="pPlayRec()">▶ 내 발음 듣기</button>`:""}
+      <button class="btn sm" style="color:var(--bad)" onclick="pDelete()">🗑 삭제</button>
     </div>
   </div>
   ${memoText(s)?`<div class="card muted small">📌 ${esc(memoText(s))}</div>`:""}
@@ -1022,6 +1060,7 @@ function practiceStartHTML(){
     <button class="btn pri" style="grid-column:1/-1;padding:14px" onclick="choose({kind:'all',lang:S.lang})">▶ 전체 연습</button>
     <button class="btn" onclick="choose({kind:'failed',lang:S.lang})" ${failed?"":"disabled"}>💔 틀린 문장 (${failed})</button>
     <button class="btn" onclick="choose({kind:'star',lang:S.lang})" ${star?"":"disabled"}>⭐ 별표 문장 (${star})</button>
+    <button class="btn" style="grid-column:1/-1" onclick="recentModal(1)">🕘 최근 학습한 문장 고르기</button>
     ${(()=>{const n=L.filter(s=>imgOf(s)).length;return n?`<button class="btn" style="grid-column:1/-1;background:#efe9fb;color:#7356c4" onclick="choose({kind:'photo',lang:S.lang})">🖼 사진 보고 말하기 (${n})</button>`:"";})()}
   </div>
   <h2>🃏 내 덱</h2>
@@ -1154,7 +1193,7 @@ function addToDeckModal(){if(!SEL||!SEL.size){toast("문장을 먼저 골라 주
 function doAddToDeck(){const nm=$("#newDeck").value.trim();const sel=document.querySelector('input[name=dk]:checked');let d;
   if(nm){d={id:uid(),user:S.me,name:nm,sids:[]};S.decks.push(d);}else if(sel)d=deckById(sel.value);else{toast("덱을 고르거나 새 이름을 넣어 주세요");return;}
   const before=d.sids.length;SEL.forEach(id=>{if(!d.sids.includes(id))d.sids.push(id);});
-  queueDeck(d);closeModal();toast(`'${d.name}'에 ${d.sids.length-before}문장 담았어요`);SEL=null;renderManage();}
+  queueDeck(d);closeModal();toast(`'${d.name}'에 ${d.sids.length-before}문장 담았어요`);SEL=null;if(view==="manage")renderManage();else if(view==="practice")renderP();}
 function queueDeck(d){S.outbox.push({op:"deckUpsert",d:{id:d.id,user:d.user,name:d.name,sids:[...d.sids]}});save();scheduleSync(800);}
 function newDeckPrompt(){mFilter="";SEL=new Set();go("manage");toast("담을 문장을 눌러서 고르세요");}
 function deckModal(id){const d=deckById(id);if(!d)return;const list=d.sids.filter(byId);
